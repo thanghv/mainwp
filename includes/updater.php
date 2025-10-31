@@ -103,18 +103,18 @@
  *
  * ➤ These filters help balance performance and responsiveness for different update sources.
  *
- * ╰──────────────────────────────────────────────────────────────────────────────────────╯ 
- * 
- * 
- * 
+ * ╰──────────────────────────────────────────────────────────────────────────────────────╯
+ *
+ *
+ *
  * 🔧 Optional Debugging:
  *     Add this anywhere in your code:
  *         add_filter( 'updater_enable_debug', fn( $e ) => true );
  *
  *     Also enable in wp-config.php:
  *         define( 'WP_DEBUG', true );
- *         define( 'WP_DEBUG_LOG', true ); * 
- * 
+ *         define( 'WP_DEBUG_LOG', true ); *
+ *
  * What This Does:
  *  - Detects updates from GitHub or private JSON endpoints
  *  - Auto-selects GitHub logic if `server` contains "github.com"
@@ -135,7 +135,7 @@
  *
  */
 
-namespace UUPD\V1;
+namespace MainWP\Dashboard\UUPD\V1;
 
 if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
 
@@ -165,7 +165,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
          *   @type string 'server'      Base URL of your updater endpoint.
          *   @type string 'plugin_file' (optional) plugin_basename(__FILE__) for plugins.
          *   @type bool 'allow_prerelease' (optional) Whether to allow updates to prerelease versions (e.g. -beta, -rc).
-         * 
+         *
          * }
          */
         public function __construct( array $config ) {
@@ -323,6 +323,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
                     case 'preview': $tag = 'beta';  break;
                     case 'rc':      $tag = 'rc';    break; // PHP is case-insensitive
                     case 'dev':     $tag = 'dev';   break;
+                    case 'er':      $tag = 'er';    break;
                     // alpha/beta already work correctly
                 }
 
@@ -357,7 +358,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
             // Skip if last fetch failed
             if ( false === $meta && get_transient( $error_key ) ) {
                 $this->log( " Skipping plugin update check for '{$slug}' — previous error cached" );
-                return $trans;
+                //return $trans;
             }
 
             // Fetch metadata if missing
@@ -368,23 +369,22 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
                     $release   = get_transient( $cache_key );
 
                     if ( false === $release ) {
-                        $api_url = str_replace( 'github.com', 'api.github.com/repos', $repo_url ) . '/releases/latest';
-                        $token   = self::apply_filters_per_slug( 'uupd/github_token_override', $c['github_token'] ?? '', $slug );
 
-                        $headers = [ 'Accept' => 'application/vnd.github.v3+json' ];
-                        if ( $token ) {
-                            $headers['Authorization'] = 'token ' . $token;
-                        }
+                        // $api_url = str_replace( 'github.com', 'api.github.com/repos', $repo_url ) . '/releases/latest';
+                        // $token   = self::apply_filters_per_slug( 'uupd/github_token_override', $c['github_token'] ?? '', $slug );
 
-                        $this->log( " GitHub fetch: $api_url" );
-                        $response = wp_remote_get( $api_url, [ 'headers' => $headers ] );
+                        // $headers = [ 'Accept' => 'application/vnd.github.v3+json' ];
+                        // if ( $token ) {
+                        //     $headers['Authorization'] = 'token ' . $token;
+                        // }
 
-                        if ( ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) === 200 ) {
-                            $release = json_decode( wp_remote_retrieve_body( $response ) );
-                            $ttl = self::apply_filters_per_slug( 'uupd_success_cache_ttl', 6 * HOUR_IN_SECONDS, $slug );
-                            set_transient( $cache_key, $release, $ttl );
-                        } else {
-                            $msg = is_wp_error( $response ) ? $response->get_error_message() : 'Invalid HTTP response';
+                        // $this->log( " GitHub fetch: $api_url" );
+                        // $response = wp_remote_get( $api_url, [ 'headers' => $headers ] );
+
+                        $release = $this->fetch_github_release( $repo_url, $slug );
+
+                        if ( false === $release ) {
+                            $msg = 'GitHub fetch failed or no releases/tags found';
                             $this->log( "✗ GitHub API failed — $msg — caching error state" );
                             set_transient(
                                 $error_key,
@@ -393,8 +393,26 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
                             );
                             do_action( 'uupd_metadata_fetch_failed', [ 'slug' => $slug, 'server' => $repo_url, 'message' => $msg ] );
                             do_action( "uupd_metadata_fetch_failed/{$slug}", [ 'slug' => $slug, 'server' => $repo_url, 'message' => $msg ] );
-                            return $trans;
+                            return $trans; // or continue depending on surrounding code
                         }
+
+
+                        // if ( ! is_wp_error( $response ) && wp_remote_retrieve_response_code( $response ) === 200 ) {
+                        //     $release = json_decode( wp_remote_retrieve_body( $response ) );
+                        //     $ttl = self::apply_filters_per_slug( 'uupd_success_cache_ttl', 6 * HOUR_IN_SECONDS, $slug );
+                        //     set_transient( $cache_key, $release, $ttl );
+                        // } else {
+                        //     $msg = is_wp_error( $response ) ? $response->get_error_message() : 'Invalid HTTP response';
+                        //     $this->log( "✗ GitHub API failed — $msg — caching error state" );
+                        //     set_transient(
+                        //         $error_key,
+                        //         time(),
+                        //         self::apply_filters_per_slug( 'uupd_fetch_remote_error_ttl', 6 * HOUR_IN_SECONDS, $slug )
+                        //     );
+                        //     do_action( 'uupd_metadata_fetch_failed', [ 'slug' => $slug, 'server' => $repo_url, 'message' => $msg ] );
+                        //     do_action( "uupd_metadata_fetch_failed/{$slug}", [ 'slug' => $slug, 'server' => $repo_url, 'message' => $msg ] );
+                        //     return $trans;
+                        // }
                     }
 
                     if ( isset( $release->tag_name ) ) {
@@ -427,7 +445,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
                     delete_transient( $error_key );
 
 
-                    
+
                 } else {
                     $this->fetch_remote(); // Handles error logging + failure cache internally
                     $meta = get_transient( $cache_id );
@@ -496,6 +514,80 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
             unset( $trans->no_update[ $file ] );
             return $trans;
         }
+
+
+        /**
+     * Fetch a GitHub "release" object with fallback logic:
+     *  - Try /releases/latest
+     *  - If 404 or empty and $allow_prerelease allows, try /releases (list)
+     *  - If still empty, fallback to /tags and synthesize a simple release object
+     *
+     * Returns release object on success, or false on failure.
+     */
+    private function fetch_github_release( $repo_url, $slug ) {
+        $repo_url = rtrim( $repo_url, '/' );
+        $api_base = str_replace( 'github.com', 'api.github.com/repos', $repo_url );
+        $token    = self::apply_filters_per_slug( 'uupd/github_token_override', $this->config['github_token'] ?? '', $slug );
+        $headers  = [ 'Accept' => 'application/vnd.github.v3+json' ];
+        if ( $token ) {
+            $headers['Authorization'] = 'token ' . $token;
+        }
+
+        // 1) Try /releases/latest
+        $this->log( " GitHub fetch (latest): {$api_base}/releases/latest" );
+        $resp = wp_remote_get( $api_base . '/releases/latest', [ 'headers' => $headers, 'timeout' => 15 ] );
+
+        if ( ! is_wp_error( $resp ) && wp_remote_retrieve_response_code( $resp ) === 200 ) {
+            $release = json_decode( wp_remote_retrieve_body( $resp ) );
+            if ( $release ) {
+                return $release;
+            }
+        }
+
+        // If /releases/latest returned 404 or otherwise, try listing releases.
+        // This will include prereleases. We'll respect allow_prerelease flag below.
+        $this->log( " GitHub fetch (list): {$api_base}/releases?per_page=10" );
+        $resp = wp_remote_get( $api_base . '/releases?per_page=10', [ 'headers' => $headers, 'timeout' => 15 ] );
+        if ( ! is_wp_error( $resp ) && wp_remote_retrieve_response_code( $resp ) === 200 ) {
+            $releases = json_decode( wp_remote_retrieve_body( $resp ) );
+            if ( is_array( $releases ) && count( $releases ) ) {
+                // If allow_prerelease is false, prefer first non-prerelease. Otherwise take the first release.
+                $allow_prerelease = $this->config['allow_prerelease'] ?? false;
+                if ( $allow_prerelease ) {
+                    return $releases[0];
+                } else {
+                    foreach ( $releases as $r ) {
+                        if ( empty( $r->prerelease ) ) {
+                            return $r;
+                        }
+                    }
+                    // None non-prerelease found — fall through to next fallback.
+                }
+            }
+        }
+
+        // 3) If there are no releases at all, try tags and synthesize a minimal "release"
+        $this->log( " GitHub fetch (tags): {$api_base}/tags?per_page=5" );
+        $resp = wp_remote_get( $api_base . '/tags?per_page=5', [ 'headers' => $headers, 'timeout' => 15 ] );
+        if ( ! is_wp_error( $resp ) && wp_remote_retrieve_response_code( $resp ) === 200 ) {
+            $tags = json_decode( wp_remote_retrieve_body( $resp ) );
+            if ( is_array( $tags ) && ! empty( $tags[0]->name ) ) {
+                $tag = $tags[0]->name;
+                // Build a minimal release-like object with tag_name and zipball_url
+                $release = new \stdClass();
+                $release->tag_name      = $tag;
+                $release->zipball_url   = $api_base . '/zipball/' . rawurlencode( $tag );
+                $release->html_url      = $repo_url;
+                $release->body          = '';
+                $release->assets        = [];
+                $release->prerelease    = preg_match( '/(alpha|beta|rc|preview|pre|dev)/i', $tag ) ? true : false;
+                return $release;
+            }
+        }
+
+        // Failure: return false
+        return false;
+    }
 
 
     public function theme_update( $trans ) {
@@ -602,7 +694,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
             'requires'     => $meta->requires ?? $meta->min_wp_version ?? '',
             'requires_php' => $meta->requires_php ?? '',
             'screenshot'   => $meta->screenshot ?? '',
-            'tested'       => $meta->tested ?? '', 
+            'tested'       => $meta->tested ?? '',
         ];
 
 
@@ -637,12 +729,12 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
 
         unset( $trans->no_update[ $slug ] );
         return $trans;
-    }   
+    }
 
 
 
 
-            
+
 
             /** Provide plugin information for the details popup. */
         public function plugin_info( $res, $action, $args ) {
@@ -680,8 +772,8 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
                 'sections'        => $sections,
                 'icons'           => isset( $meta->icons )   ? (array) $meta->icons   : [],
                 'banners'         => isset( $meta->banners ) ? (array) $meta->banners : [],
-                'screenshots'     => isset( $meta->screenshots ) 
-                                       ? (array) $meta->screenshots 
+                'screenshots'     => isset( $meta->screenshots )
+                                       ? (array) $meta->screenshots
                                        : [],
             ];
         }
@@ -690,7 +782,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
             public function theme_info( $res, $action, $args ) {
                 $c = $this->config;
                 $slug = $c['real_slug'] ?? $c['slug'];
-                
+
                 if ( 'theme_information' !== $action || $args->slug !== $slug ) {
                     return $res;
                 }
@@ -797,7 +889,7 @@ if ( ! class_exists( __NAMESPACE__ . '\UUPD_Updater_V1' ) ) {
 
             // 2) If the incoming 'slug' doesn’t match this plugin’s slug, bail out early:
             if ( $request_slug !== $slug ) {
-                return; 
+                return;
             }
 
             // 3) Only users who can update plugins/themes should proceed.
