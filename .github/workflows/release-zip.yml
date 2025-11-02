@@ -1,5 +1,11 @@
 name: Build WP release ZIP
 
+# ensure GITHUB_TOKEN has write access to repo contents and packages
+permissions:
+  contents: write
+  packages: write
+  # optionally: checks: write, issues: write if you need those
+
 on:
   release:
     types: [published]
