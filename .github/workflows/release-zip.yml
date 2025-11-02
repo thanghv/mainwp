@@ -114,24 +114,28 @@ jobs:
       - name: Get or create release (workflow_dispatch)
         id: get_release_id
         env:
-          API_TOKEN: "${{ env.REPO_TOKEN }}${{ secrets.GITHUB_TOKEN }}"
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}
         run: |
           set -euo pipefail
-          # Prefer REPO_TOKEN (PAT) if set; otherwise use GITHUB_TOKEN
-          API_TOKEN="${{ secrets.RELEASE_TOKEN }}"
+
+          # Prefer RELEASE_TOKEN (PAT) if provided; otherwise use the runner GITHUB_TOKEN.
+          API_TOKEN="${RELEASE_TOKEN:-${GITHUB_TOKEN:-}}"
+
           if [ -z "$API_TOKEN" ]; then
-            API_TOKEN="${GITHUB_TOKEN}"
+            echo "Error: no API token available. Provide a RELE ASE_TOKEN secret (personal access token) or allow GITHUB_TOKEN write permissions." >&2
+            exit 1
           fi
 
+          # If triggered by a release event, read release id from payload
           if [ "${{ github.event_name }}" = "release" ]; then
-            # release id available in event payload
             echo "release_id=${{ github.event.release.id }}" >> $GITHUB_OUTPUT
             exit 0
           fi
 
           TAG="${{ steps.vars.outputs.TAG }}"
           if [ -z "$TAG" ]; then
-            echo "Error: no tag provided. Provide 'tag' input for workflow_dispatch." >&2
+            echo "Error: no tag provided. Provide 'tag' input when running workflow_dispatch." >&2
             exit 1
           fi
 
