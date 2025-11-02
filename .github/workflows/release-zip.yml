@@ -6,12 +6,13 @@ on:
   workflow_dispatch:
 
 env:
-  # explicit plugin folder name inside the zip
+  # Folder name inside the ZIP (should match plugin main folder name)
   PLUGIN_SLUG: mainwp
 
 jobs:
   build-and-upload:
     runs-on: ubuntu-latest
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -32,56 +33,54 @@ jobs:
           echo "DIST_DIR=${DIST_DIR}" >> $GITHUB_OUTPUT
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Optional build (composer / npm) — runs only if files exist
+      - name: Optional build (composer / npm)
         run: |
           set -euo pipefail
-          # Composer: if composer.json exists, install prod dependencies
+
+          # Composer build
           if [ -f composer.json ]; then
-            php -r "copy('https://getcomposer.org/installer','composer-setup.php');"
+            echo "Installing Composer dependencies..."
+            php -r "copy('https://getcomposer.org/installer', 'composer-setup.php');"
             php composer-setup.php --install-dir=/tmp --filename=composer
             /tmp/composer install --no-dev --optimize-autoloader
             rm -f composer-setup.php
           fi
 
-          # NPM: if package.json exists, run npm ci and optional build
+          # Node build
           if [ -f package.json ]; then
-            # ensure node & npm are available
-            node --version || ( echo "Node not found, installing via actions/setup-node" && exit 1 )
+            echo "Installing npm dependencies..."
             npm ci
             if npm run | grep -q ' build'; then
+              echo "Running npm build..."
               npm run build || true
             fi
           fi
-        # If you rely on Node sometimes, you can enable setup-node as a separate step;
-        # the step above expects node to be present if package.json exists. If you want
-        # to ensure Node is installed only when needed, use a separate setup-node step.
 
-      - name: Prepare dist folder and copy repo into plugin-named folder
+      - name: Prepare dist folder
         run: |
           set -euo pipefail
           PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
           rm -rf dist
           mkdir -p dist
-          # copy everything (including dotfiles) into dist/<PLUGIN_DIR>
-          shopt -s dotglob || true
-          cp -R . "dist/${PLUGIN_DIR}/"
-          # remove git metadata and workflow files from the packaged folder
-          rm -rf "dist/${PLUGIN_DIR}/.git"
-          rm -rf "dist/${PLUGIN_DIR}/.github"
-          rm -rf "dist/${PLUGIN_DIR}/dist"
-          rm -rf "dist/${PLUGIN_DIR}/node_modules"
 
-      - name: Create zip with exact top-level folder name
+          echo "Copying files into dist/${PLUGIN_DIR}/..."
+          rsync -av \
+            --exclude='.git' \
+            --exclude='.github' \
+            --exclude='dist' \
+            --exclude='node_modules' \
+            --exclude='*.zip' \
+            ./ "dist/${PLUGIN_DIR}/"
+
+      - name: Create ZIP file
         working-directory: dist
         run: |
           set -euo pipefail
           ZIP_NAME="${{ steps.vars.outputs.ZIP_NAME }}"
           PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
-          # Important: zip the folder by name so the top-level entry is exactly "$PLUGIN_DIR/"
           zip -r "$ZIP_NAME" "$PLUGIN_DIR"
-          ls -lh "$ZIP_NAME"
-          # show list for debugging
-          unzip -l "$ZIP_NAME" | sed -n '1,20p'
+          echo "Created ZIP: $ZIP_NAME"
+          unzip -l "$ZIP_NAME" | head -n 20
 
       - name: Upload ZIP as release asset
         uses: softprops/action-gh-release@v1
