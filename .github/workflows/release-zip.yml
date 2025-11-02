@@ -5,9 +5,8 @@ on:
     types: [published]
 
 env:
-  # If your plugin folder should be different from the repo name, override here.
-  # e.g. PLUGIN_SLUG: my-plugin
-  PLUGIN_SLUG: ${{ github.event.repository.name }}
+  # explicit plugin folder name inside the zip
+  PLUGIN_SLUG: mainwp
 
 jobs:
   build-and-upload:
@@ -18,7 +17,7 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Set up vars
+      - name: Set variables
         id: vars
         run: |
           REPO_NAME=$(basename "${GITHUB_REPOSITORY}")
@@ -32,37 +31,47 @@ jobs:
           echo "DIST_DIR=${DIST_DIR}" >> $GITHUB_OUTPUT
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Optional build (npm)
-        if: fileExists('package.json')
-        uses: actions/setup-node@v4
-        with:
-          node-version: '18'
-      - name: Run npm build if package.json exists
-        if: fileExists('package.json')
+      - name: Optional build (composer/npm)
+        if: ${{ (fileExists('composer.json') || fileExists('package.json')) }}
         run: |
-          npm ci
-          if npm run | grep -q 'build'; then
-            npm run build
+          if [ -f composer.json ]; then
+            php -r "copy('https://getcomposer.org/installer','composer-setup.php');"
+            php composer-setup.php --install-dir=/tmp --filename=composer
+            /tmp/composer install --no-dev --optimize-autoloader
+          fi
+          if [ -f package.json ]; then
+            npm ci
+            if npm run | grep -q ' build'; then
+              npm run build || true
+            fi
           fi
 
       - name: Prepare dist folder and copy repo into plugin-named folder
         run: |
-          set -e
+          set -euo pipefail
+          PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
           rm -rf dist
           mkdir -p dist
-          PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
-          # Copy repository files into dist/<plugin-dir> excluding .git and .github
-          rsync -av --exclude='.git' --exclude='.github' --exclude='dist' --exclude='node_modules' --exclude='*.zip' ./ "dist/${PLUGIN_DIR}/"
-          # Remove files you don't want in the release zip (optional)
-          rm -f "dist/${PLUGIN_DIR}/.github/workflows/release-zip.yml" || true
+          # copy everything (including dotfiles) into dist/<PLUGIN_DIR>
+          shopt -s dotglob || true
+          cp -R . "dist/${PLUGIN_DIR}/"
+          # remove git metadata and workflow files from the packaged folder
+          rm -rf "dist/${PLUGIN_DIR}/.git"
+          rm -rf "dist/${PLUGIN_DIR}/.github"
+          rm -rf "dist/${PLUGIN_DIR}/dist"
+          rm -rf "dist/${PLUGIN_DIR}/node_modules"
 
-      - name: Create zip
+      - name: Create zip with exact top-level folder name
+        working-directory: dist
         run: |
-          cd dist
+          set -e
           ZIP_NAME="${{ steps.vars.outputs.ZIP_NAME }}"
-          # create zip with the plugin-dir as the top-level folder
-          zip -r "$ZIP_NAME" ./*
+          PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
+          # Important: zip the folder by name so the top-level entry is exactly "$PLUGIN_DIR/"
+          zip -r "$ZIP_NAME" "$PLUGIN_DIR"
           ls -lh "$ZIP_NAME"
+          # show list for debugging
+          unzip -l "$ZIP_NAME" | sed -n '1,20p'
 
       - name: Upload ZIP as release asset
         uses: softprops/action-gh-release@v1
