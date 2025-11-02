@@ -1,0 +1,72 @@
+name: Build WP release ZIP
+
+on:
+  release:
+    types: [published]
+
+env:
+  # If your plugin folder should be different from the repo name, override here.
+  # e.g. PLUGIN_SLUG: my-plugin
+  PLUGIN_SLUG: ${{ github.event.repository.name }}
+
+jobs:
+  build-and-upload:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up vars
+        id: vars
+        run: |
+          REPO_NAME=$(basename "${GITHUB_REPOSITORY}")
+          PLUGIN_DIR="${PLUGIN_SLUG:-$REPO_NAME}"
+          TAG="${GITHUB_REF##*/}"
+          DIST_DIR="dist"
+          ZIP_NAME="${PLUGIN_DIR}.zip"
+          echo "REPO_NAME=${REPO_NAME}" >> $GITHUB_OUTPUT
+          echo "PLUGIN_DIR=${PLUGIN_DIR}" >> $GITHUB_OUTPUT
+          echo "TAG=${TAG}" >> $GITHUB_OUTPUT
+          echo "DIST_DIR=${DIST_DIR}" >> $GITHUB_OUTPUT
+          echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
+
+      - name: Optional build (npm)
+        if: fileExists('package.json')
+        uses: actions/setup-node@v4
+        with:
+          node-version: '18'
+      - name: Run npm build if package.json exists
+        if: fileExists('package.json')
+        run: |
+          npm ci
+          if npm run | grep -q 'build'; then
+            npm run build
+          fi
+
+      - name: Prepare dist folder and copy repo into plugin-named folder
+        run: |
+          set -e
+          rm -rf dist
+          mkdir -p dist
+          PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
+          # Copy repository files into dist/<plugin-dir> excluding .git and .github
+          rsync -av --exclude='.git' --exclude='.github' --exclude='dist' --exclude='node_modules' --exclude='*.zip' ./ "dist/${PLUGIN_DIR}/"
+          # Remove files you don't want in the release zip (optional)
+          rm -f "dist/${PLUGIN_DIR}/.github/workflows/release-zip.yml" || true
+
+      - name: Create zip
+        run: |
+          cd dist
+          ZIP_NAME="${{ steps.vars.outputs.ZIP_NAME }}"
+          # create zip with the plugin-dir as the top-level folder
+          zip -r "$ZIP_NAME" ./*
+          ls -lh "$ZIP_NAME"
+
+      - name: Upload ZIP as release asset
+        uses: softprops/action-gh-release@v1
+        with:
+          files: dist/${{ steps.vars.outputs.ZIP_NAME }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
