@@ -145,8 +145,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload ZIP as release asset
-        # Using the official upload-release-asset action
-        uses: actions/upload-release-asset@v2
+        uses: actions/upload-release-asset@v1
         with:
           upload_url: https://uploads.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release_id.outputs.release_id }}/assets{?name,label}
           asset_path: dist/${{ steps.vars.outputs.ZIP_NAME }}
@@ -154,3 +153,4 @@ jobs:
           asset_content_type: application/zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
