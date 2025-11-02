@@ -3,6 +3,7 @@ name: Build WP release ZIP
 on:
   release:
     types: [published]
+  workflow_dispatch:
 
 env:
   # explicit plugin folder name inside the zip
@@ -31,20 +32,29 @@ jobs:
           echo "DIST_DIR=${DIST_DIR}" >> $GITHUB_OUTPUT
           echo "ZIP_NAME=${ZIP_NAME}" >> $GITHUB_OUTPUT
 
-      - name: Optional build (composer/npm)
-        if: ${{ (fileExists('composer.json') || fileExists('package.json')) }}
+      - name: Optional build (composer / npm) — runs only if files exist
         run: |
+          set -euo pipefail
+          # Composer: if composer.json exists, install prod dependencies
           if [ -f composer.json ]; then
             php -r "copy('https://getcomposer.org/installer','composer-setup.php');"
             php composer-setup.php --install-dir=/tmp --filename=composer
             /tmp/composer install --no-dev --optimize-autoloader
+            rm -f composer-setup.php
           fi
+
+          # NPM: if package.json exists, run npm ci and optional build
           if [ -f package.json ]; then
+            # ensure node & npm are available
+            node --version || ( echo "Node not found, installing via actions/setup-node" && exit 1 )
             npm ci
             if npm run | grep -q ' build'; then
               npm run build || true
             fi
           fi
+        # If you rely on Node sometimes, you can enable setup-node as a separate step;
+        # the step above expects node to be present if package.json exists. If you want
+        # to ensure Node is installed only when needed, use a separate setup-node step.
 
       - name: Prepare dist folder and copy repo into plugin-named folder
         run: |
@@ -64,7 +74,7 @@ jobs:
       - name: Create zip with exact top-level folder name
         working-directory: dist
         run: |
-          set -e
+          set -euo pipefail
           ZIP_NAME="${{ steps.vars.outputs.ZIP_NAME }}"
           PLUGIN_DIR="${{ steps.vars.outputs.PLUGIN_DIR }}"
           # Important: zip the folder by name so the top-level entry is exactly "$PLUGIN_DIR/"
