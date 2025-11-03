@@ -168,12 +168,23 @@ jobs:
             echo "release_id=$RELEASE_ID" >> $GITHUB_OUTPUT
           fi
 
+      # Confirm artifact exists and show the upload_url (safe: does not echo tokens)
+      - name: Diagnostics
+        run: |
+          echo "workspace files:"
+          ls -la
+          echo "dist listing:"
+          ls -la dist || true
+          echo "upload_url from create_release:"
+          echo "${{ steps.create_release.outputs.upload_url }}"
+
       - name: Upload ZIP as release asset
+        id: upload_release_asset
         uses: actions/upload-release-asset@v1
         env:
-          API_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}    # <- MUST be GITHUB_TOKEN
         with:
-          upload_url: https://uploads.github.com/repos/${{ github.repository }}/releases/${{ steps.get_release_id.outputs.release_id }}/assets{?name,label}
-          asset_path: dist/${{ steps.vars.outputs.ZIP_NAME }}
+          upload_url: ${{ steps.create_release.outputs.upload_url }}   # pass the action output
+          asset_path: dist/${{ steps.vars.outputs.ZIP_NAME }}         # ensure this file exists
           asset_name: ${{ steps.vars.outputs.ZIP_NAME }}
           asset_content_type: application/zip
