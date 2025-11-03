@@ -85,6 +85,12 @@ jobs:
             --exclude='dist' \
             --exclude='node_modules' \
             --exclude='*.zip' \
+            --exclude='.gitattributes' \
+            --exclude='.gitignore' \
+            --exclude='LICENSE.md' \
+            --exclude='LICENSE.txt' \
+            --exclude='phpcs.xml' \
+            --exclude='README.md' \
             ./ "dist/${PLUGIN_DIR}/"
 
       - name: Create ZIP file
