@@ -8,11 +8,11 @@
 namespace MainWP\Dashboard;
 
 /**
- * Class MainWP_Custom_Reinstaller
+ * Class MainWP_Custom_Updater
  *
  * @package MainWP\Dashboard
  */
-class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.ContentAfterBrace -- NOSONAR.
+class MainWP_Custom_Updater { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.ContentAfterBrace -- NOSONAR.
 
     // phpcs:disable WordPress.WP.AlternativeFunctions -- use system functions
 
@@ -42,7 +42,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
     }
 
     /**
-     * MainWP_Custom_Reinstaller constructor.
+     * MainWP_Custom_Updater constructor.
      *
      * Run each time the class is called.
      *
@@ -53,24 +53,49 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
     }
 
     /**
-     * Add a "Reinstall" action link to the plugin action links.
-     *
-     * @param array $links Array of existing action links for the plugin.
-     * @return array Modified array of action links including the reinstall link.
+     * Method hook_plugins_loaded().
      */
-    public function reinstall_actions_link( $links ) {
-        $url                = wp_nonce_url(
-            add_query_arg(
+    public function hook_plugins_loaded() {
+        if ( 1 === (int) get_option( 'mainwp_settings_enable_early_updates' ) ) {
+            $this->init_custom_updater();
+            /**
+             * Provide custom content for the plugin details modal.
+             */
+            add_filter( 'plugins_api', array( &$this, 'plugin_information_link' ), 10, 3 );
+        }
+        // Handle reinstall.
+        add_action( 'admin_init', array( &$this, 'handle_reinstall_request' ) );
+    }
+
+    /**
+     * Method init_custom_updater().
+     */
+    public function init_custom_updater() {
+        if ( file_exists( MAINWP_PLUGIN_DIR . 'includes/updater.php' ) ) {
+            require_once MAINWP_PLUGIN_DIR . 'includes/updater.php'; //phpcs:ignore -- NOSONAR - compatible.
+        }
+
+        if ( class_exists( '\MainWP\Dashboard\UUPD\V1\UUPD_Updater_V1' ) ) {
+            /**
+             * Filter: mainwp_custom_updater_register_info
+             *
+             * @since 6.0
+             */
+            $updater_config = apply_filters(
+                'mainwp_custom_updater_register_info',
                 array(
-                    'action' => 'reinstall_stable',
-                    'plugin' => plugin_basename( MAINWP_PLUGIN_FILE ),
-                ),
-                admin_url( 'plugins.php' )
-            ),
-            'reinstall_stable'
-        );
-        $links['reinstall'] = '<a href="' . esc_url( $url ) . '">' . esc_html__( 'Reinstall', 'mainwp' ) . '</a>';
-        return $links;
+                    'plugin_file'      => plugin_basename( MAINWP_PLUGIN_FILE ),
+                    'slug'             => 'mainwp',
+                    'name'             => 'MainWP',
+                    'version'          => MainWP_System::$version,
+                    // Optional: provide a 'key' entry with your secret when using a private GitHub release server.
+                    'server'           => 'https://github.com/github-username/mainwp',  // GitHub or private server.
+                    // 'github_token'     => 'github_pat_xxxxxx', // optional.
+                    'allow_prerelease' => true, // Optional � default is false. Set to true to allow beta/RC updates.
+                )
+            );
+            \MainWP\Dashboard\UUPD\V1\UUPD_Updater_V1::register( $updater_config );
+        }
     }
 
     /**
@@ -86,16 +111,9 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
             wp_die( 'No permission.' );
         }
 
-        $plugin = sanitize_text_field( wp_unslash( $_GET['plugin'] ?? '' ) );
-
-        if ( empty( $plugin ) ) {
-            wp_safe_redirect( admin_url( 'plugins.php?reinstall=error' ) );
-            exit;
-        }
+        $plugin = 'mainwp/mainwp.php';
 
         // --- safer reinstall: move to backup, install, restore on fail, then activate ---
-
-        // $plugin expected like "mainwp/mainwp.php" and $was_active boolean available.
 
         require_once ABSPATH . 'wp-admin/includes/class-wp-upgrader.php'; //phpcs:ignore -- NOSONAR - ok.
         require_once ABSPATH . 'wp-admin/includes/plugin.php'; //phpcs:ignore -- NOSONAR - ok.
@@ -123,18 +141,18 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         // 1) move plugin dir to backup (atomic rename preferred)
         $moved_to_backup = false;
         if ( is_dir( $plugin_dir ) ) {
-            if ( @rename( $plugin_dir, $backup_path ) ) {
+            if ( rename( $plugin_dir, $backup_path ) ) {
                 $moved_to_backup = true;
                 self::plugin_reinstall_log( $plugin, 'moved_to_backup', 'Renamed to backup', array( 'backup_path' => $backup_path ) );
             } else {
-                // Try recursive copy then we'll delete original (best-effort)
+                // Try recursive copy then we'll delete original (best-effort).
                 $rcopy = function ( $src, $dst ) use ( &$rcopy ) {
                     if ( is_file( $src ) ) {
                         $dstdir = dirname( $dst );
                         if ( ! file_exists( $dstdir ) ) {
                             wp_mkdir_p( $dstdir );
                         }
-                        return @copy( $src, $dst );
+                        return copy( $src, $dst );
                     }
                     if ( ! is_dir( $dst ) ) {
                         wp_mkdir_p( $dst );
@@ -157,7 +175,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                             if ( ! file_exists( $dstdir ) ) {
                                 wp_mkdir_p( $dstdir );
                             }
-                            $ok = $ok && @copy( $s, $d );
+                            $ok = $ok && copy( $s, $d );
                         }
                     }
                     closedir( $dh );
@@ -177,10 +195,10 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                         if ( is_dir( $path ) ) {
                             $rrmdir( $path );
                         } else {
-                            @unlink( $path );
+                            unlink( $path );
                         }
                     }
-                    return @rmdir( $dir );
+                    return rmdir( $dir );
                 };
 
                 if ( $rcopy( $plugin_dir, $backup_path ) ) {
@@ -192,7 +210,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                     // Could not backup; abort and report error.
                     $msg = "Reinstall: failed to move or copy plugin directory to backup for {$plugin}";
                     self::plugin_reinstall_log( $plugin, 'backup_failed', $msg );
-                    wp_safe_redirect( admin_url( 'plugins.php?reinstall=backup_failed' ) );
+                    wp_safe_redirect( admin_url( 'admin.php?page=EarlyUpdates?reinstall=backup_failed' ) );
                     exit;
                 }
             }
@@ -202,7 +220,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         }
 
         // 2) Log a snapshot of plugin dir before install (for debugging)
-        $before = @scandir( WP_PLUGIN_DIR );
+        $before = scandir( WP_PLUGIN_DIR );
         self::plugin_reinstall_log( $plugin, 'snapshot_before', 'plugins dir before install', array( 'snapshot' => $before ) );
 
         // 3) Install package
@@ -223,11 +241,11 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         );
 
         // 4) Snapshot after install
-        $after = @scandir( WP_PLUGIN_DIR );
+        $after = scandir( WP_PLUGIN_DIR );
         self::plugin_reinstall_log( $plugin, 'snapshot_after', 'plugins dir after install', array( 'snapshot' => $after ) );
 
         // 5) If install failed, restore backup and report
-        if ( is_wp_error( $res ) || $res === false ) {
+        if ( is_wp_error( $res ) || false === $res ) {
             // attempt restore if we backed up.
             if ( $moved_to_backup && is_dir( $backup_path ) ) {
                 // if an install created a (possibly empty) directory at $plugin_dir, remove it first,
@@ -246,10 +264,10 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                             if ( is_dir( $path ) ) {
                                 $rrmdir( $path );
                             } else {
-                                @unlink( $path );
+                                unlink( $path );
                             }
                         }
-                        return @rmdir( $dir );
+                        return rmdir( $dir );
                     };
                     $rrmdir( $plugin_dir );
                 }
@@ -265,7 +283,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                             if ( ! file_exists( $dstdir ) ) {
                                 wp_mkdir_p( $dstdir );
                             }
-                            return @copy( $src, $dst );
+                            return copy( $src, $dst );
                         }
                         if ( ! is_dir( $dst ) ) {
                             wp_mkdir_p( $dst );
@@ -288,7 +306,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                                 if ( ! file_exists( $dstdir ) ) {
                                     wp_mkdir_p( $dstdir );
                                 }
-                                $ok = $ok && @copy( $s, $d );
+                                $ok = $ok && copy( $s, $d );
                             }
                         }
                         closedir( $dh );
@@ -302,7 +320,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                 }
             }
 
-            wp_safe_redirect( admin_url( 'plugins.php?reinstall=install_failed' ) );
+            wp_safe_redirect( admin_url( 'admin.php?page=EarlyUpdates&reinstall=install_failed' ) );
             exit;
         }
 
@@ -321,7 +339,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
             $all_plugins = get_plugins();
             foreach ( $all_plugins as $basename => $data ) {
                 $full  = WP_PLUGIN_DIR . '/' . $basename;
-                $mtime = @filemtime( $full );
+                $mtime = filemtime( $full );
                 if ( $mtime !== false && ( $now - $mtime ) <= 600 ) {
                     $found = $basename;
                     break;
@@ -334,7 +352,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
             $msg = "Reinstall: install completed but unable to locate main plugin file for expected {$plugin}. Backup kept at {$backup_path}.";
             self::plugin_reinstall_log( $plugin, 'installed_missing_main_but_backup', $msg, array( 'backup_path' => $backup_path ) );
             // return backup path in URL so admin can inspect.
-            wp_safe_redirect( admin_url( 'plugins.php?reinstall=installed_missing_main&backup=' . rawurlencode( $backup_path ) ) );
+            wp_safe_redirect( admin_url( 'admin.php?page=EarlyUpdates&reinstall=installed_missing_main&backup=' . rawurlencode( $backup_path ) ) );
             exit;
         }
 
@@ -353,7 +371,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                         'activate_error' => $act->get_error_messages(),
                     )
                 );
-                wp_safe_redirect( admin_url( 'plugins.php?reinstall=installed_but_activate_failed&plugin=' . rawurlencode( $found ) . '&backup=' . rawurlencode( $backup_path ) ) );
+                wp_safe_redirect( admin_url( 'admin.php?page=EarlyUpdates&reinstall=installed_but_activate_failed&plugin=' . rawurlencode( $found ) . '&backup=' . rawurlencode( $backup_path ) ) );
                 exit;
             }
         }
@@ -370,7 +388,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         }
 
         // then final redirect.
-        wp_safe_redirect( admin_url( 'plugins.php?reinstall=success' ) );
+        wp_safe_redirect( admin_url( 'admin.php?page=EarlyUpdates&reinstall=success' ) );
         exit;
     }
 
@@ -388,7 +406,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         $plugins = get_plugins();
 
         foreach ( $plugins as $basename => $data ) {
-            // Extract folder from basename: "mainwp/mainwp.php" → "mainwp"
+            // Extract folder from basename: "mainwp/mainwp.php" → "mainwp".
             $folder = dirname( $basename );
             if ( $folder === $slug || strpos( $basename, $slug . '/' ) === 0 ) {
                 return $basename;
@@ -442,7 +460,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
             if ( ! is_dir( $dir ) ) {
                 return false;
             }
-            $dh = @opendir( $dir );
+            $dh = opendir( $dir );
             if ( ! $dh ) {
                 return false;
             }
@@ -486,7 +504,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         }
 
         // 2) Look for recently modified directories and scan each recursively
-        $dirs = @scandir( WP_PLUGIN_DIR );
+        $dirs = scandir( WP_PLUGIN_DIR );
         if ( $dirs && is_array( $dirs ) ) {
             foreach ( $dirs as $d ) {
                 if ( '.' === $d || '..' === $d ) {
@@ -496,13 +514,13 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                 if ( ! is_dir( $path ) ) {
                     continue;
                 }
-                $mtime = @filemtime( $path );
-                if ( $mtime === false ) {
+                $mtime = filemtime( $path );
+                if ( false === $mtime ) {
                     $mtime = 0;
                 }
-                // only consider directories modified recently (or the slug which we already checked)
+                // only consider directories modified recently (or the slug which we already checked).
                 if ( ( $now - $mtime ) <= $new_install_window_secs ) {
-                    // avoid rescanning slug if already done
+                    // avoid rescanning slug if already done.
                     if ( in_array( $d, $candidates_checked, true ) ) {
                         continue;
                     }
@@ -529,7 +547,7 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
 
         // 3) Fallback: scan whole plugins dir (heavy) but limited by depth and only for directories we haven't checked
         // Use this as last resort because it can be slow on large sites.
-        $dirs = @scandir( WP_PLUGIN_DIR );
+        $dirs = scandir( WP_PLUGIN_DIR );
         if ( $dirs && is_array( $dirs ) ) {
             foreach ( $dirs as $d ) {
                 if ( '.' === $d || '..' === $d ) {
@@ -566,15 +584,15 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
         foreach ( $all_plugins as $basename => $data ) {
             if ( strpos( $basename, '/' ) === false ) {
                 $full  = WP_PLUGIN_DIR . '/' . $basename;
-                $mtime = @filemtime( $full );
-                if ( $mtime !== false && ( $now - $mtime ) <= $new_install_window_secs ) {
+                $mtime = filemtime( $full );
+                if ( false !== $mtime && ( $now - $mtime ) <= $new_install_window_secs ) {
                     self::plugin_reinstall_log( $expected_basename, 'locate_found', 'Found root-level file', array( 'found' => $basename ) );
                     return $basename;
                 }
             }
         }
 
-        // Nothing found — log diagnostics
+        // Nothing found — log diagnostics.
         self::plugin_reinstall_log( $expected_basename, 'locate_not_found', 'Could not locate installed plugin file', array( 'checked_dirs' => $candidates_checked ) );
 
         return false;
@@ -634,10 +652,10 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
                 if ( is_dir( $path ) ) {
                     $rrmdir( $path );
                 } else {
-                    @unlink( $path );
+                    unlink( $path );
                 }
             }
-            return @rmdir( $dir );
+            return rmdir( $dir );
         };
 
         $ok = $rrmdir( $backup_path );
@@ -653,24 +671,49 @@ class MainWP_Custom_Reinstaller { // phpcs:ignore Generic.Classes.OpeningBraceSa
 
 
     /**
-     * Method reinstall_admin_notices()
+     * Method plugin_information_link.
+     *
+     * @param  mixed $res Information response.
+     * @param  mixed $action Action type.
+     * @param  mixed $args  Arguments.
+     * @return void
      */
-    public function reinstall_admin_notices() {
-        if ( empty( $_GET['reinstall'] ) ) { //phpcs:ignore WordPress.Security.NonceVerification,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-            return;
+    public function plugin_information_link( $res, $action, $args ) {
+
+        // Only handle plugin information requests.
+        if ( 'plugin_information' !== $action ) {
+            return $res;
         }
-        $code  = sanitize_text_field( wp_unslash( $_GET['reinstall'] ) ); //phpcs:ignore WordPress.Security.NonceVerification,WordPress.Security.ValidatedSanitizedInput.InputNotSanitized
-        $msgs  = array(
-            'success'                       => __( 'Plugin reinstalled successfully.', 'mainwp' ),
-            'delete_failed'                 => __( 'Failed to remove old plugin files.', 'mainwp' ),
-            'install_failed'                => __( 'Failed to install plugin from WordPress.org.', 'mainwp' ),
-            'installed_but_activate_failed' => __( 'Installed but activation failed.', 'mainwp' ),
-            'error'                         => __( 'Reinstall failed (invalid plugin).', 'mainwp' ),
+
+        // The plugin slug to match — change this to your plugin folder slug.
+        $expected_slug = 'mainwp';
+
+        if ( empty( $args->slug ) || $args->slug !== $expected_slug ) {
+            return $res;
+        }
+
+        // Build the response object.
+        $response = new \stdClass();
+
+        // Basic metadata.
+        $response->name     = 'MainWP';                // plugin display name.
+        $response->slug     = $expected_slug;             // plugin folder slug.
+        $response->author   = '<a href="https://mainwp.com">MainWP</a>';
+        $response->requires = '6.2';
+        $response->tested   = '6.8.3';
+        $response->homepage = 'https://mainwp.com';
+
+        // Long HTML sections shown in the modal. Use HTML safely (WP outputs this directly).
+        $response->sections = array(
+            'Changelog' => '
+                <a href="https://mainwp.com/mainwp-early-release/" target="_blank">https://mainwp.com/mainwp-early-release/</a>
+            ',
         );
-        $class = strpos( $code, 'success' ) === 0 ? 'infor' : 'red';
-        $text  = $msgs[ $code ] ?? __( 'Unknown status.', 'mainwp' );
-        echo '<div class="ui message ' . esc_attr( $class ) . '"><p>' . esc_html( $text ) . '</p></div>';
+
+        return $response;
     }
+
+
 
     /**
      * Simple logger helper that records into an option (capped) and also supports message context.

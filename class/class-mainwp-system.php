@@ -29,7 +29,7 @@ class MainWP_System { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
      *
      * @var string Current plugin version.
      */
-    public static $version = '6.0-beta.11'; // NOSONAR.
+    public static $version = 'v6.0-rc.4'; // NOSONAR.
 
     /**
      * Private static variable to hold the single instance of the class.
@@ -193,7 +193,7 @@ class MainWP_System { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
         add_filter( 'pre_set_site_transient_update_plugins', array( $systemHandler, 'pre_check_update_custom' ) );
         add_filter( 'plugins_api', array( $systemHandler, 'plugins_api_extension_info' ), 10, 3 );
         add_filter( 'plugins_api_result', array( $systemHandler, 'plugins_api_wp_plugins_api_result' ), 10, 3 );
-        add_action( 'plugins_loaded', array( &$this, 'hook_plugins_loaded' ), 1 );
+        add_action( 'plugins_loaded', array( MainWP_Custom_Updater::instance(), 'hook_plugins_loaded' ), 1 );
 
         $this->metaboxes = new MainWP_Meta_Boxes();
 
@@ -423,43 +423,6 @@ class MainWP_System { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
         }
     }
 
-    /**
-     * Method hook_plugins_loaded().
-     */
-    public function hook_plugins_loaded() {
-        if ( 1 === (int) get_option( 'mainwp_enableCustomUpdater' ) ) {
-            $this->init_custom_updater();
-
-            // Add "Reinstall" action link.
-            add_filter( 'plugin_action_links_' . plugin_basename( MAINWP_PLUGIN_FILE ), array( MainWP_Custom_Reinstaller::instance(), 'reinstall_actions_link' ) );
-            // Handle reinstall.
-            add_action( 'admin_init', array( MainWP_Custom_Reinstaller::instance(), 'handle_reinstall_request' ) );
-            add_action( 'admin_notices', array( MainWP_Custom_Reinstaller::instance(), 'reinstall_admin_notices' ) );
-        }
-    }
-
-    /**
-     * Method init_custom_updater().
-     */
-    public function init_custom_updater() {
-        if ( file_exists( MAINWP_PLUGIN_DIR . 'includes/updater.php' ) ) {
-            require_once MAINWP_PLUGIN_DIR . 'includes/updater.php'; //phpcs:ignore -- NOSONAR - compatible.
-        }
-
-        if ( class_exists( '\MainWP\Dashboard\UUPD\V1\UUPD_Updater_V1' ) ) {
-            $updater_config = array(
-                'plugin_file'      => plugin_basename( MAINWP_PLUGIN_FILE ),
-                'slug'             => 'mainwp',
-                'name'             => 'MainWP',
-                'version'          => static::$version,
-                // 'key'              => 'YourSecretKeyHere',             // optional if using GitHub
-                'server'           => 'https://github.com/github-username/mainwp',  // GitHub or private server.
-                'github_token'     => 'github_pat_xxxxxx', // optional.
-                'allow_prerelease' => true, // Optional � default is false. Set to true to allow beta/RC updates.
-            );
-            \MainWP\Dashboard\UUPD\V1\UUPD_Updater_V1::register( $updater_config );
-        }
-    }
 
     /**
      * Method wp_mail_failed()
@@ -612,7 +575,7 @@ class MainWP_System { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
      */
     public static function is_mainwp_site_page() {
         //phpcs:disable WordPress.Security.NonceVerification.Recommended
-        if ( isset( $_GET['page'] ) && 'CostTrackerAdd' !== $_GET['page'] && ( ( ( isset( $_GET['id'] ) && ! empty( $_GET['id'] ) ) || ( isset( $_GET['dashboard'] ) && ! empty( $_GET['dashboard'] ) ) || ( isset( $_GET['updateid'] ) && ! empty( $_GET['updateid'] ) ) || ( isset( $_GET['monitor_wpid'] ) && ! empty( $_GET['monitor_wpid'] ) ) || ( isset( $_GET['emailsettingsid'] ) && ! empty( $_GET['emailsettingsid'] ) ) || ( isset( $_GET['scanid'] ) && ! empty( $_GET['scanid'] ) ) ) || ( 'ServerInformation' === $_GET['page'] || 'ServerInformationCron' === $_GET['page'] || 'ErrorLog' === $_GET['page'] || 'ActionLogs' === $_GET['page'] || 'PluginPrivacy' === $_GET['page'] || 'Settings' === $_GET['page'] || 'SettingsAdvanced' === $_GET['page'] || 'SettingsEmail' === $_GET['page'] || 'MainWPTools' === $_GET['page'] || 'SettingsInsights' === $_GET['page'] || 'SettingsApiBackups' === $_GET['page'] ) ) ) {
+        if ( isset( $_GET['page'] ) && 'CostTrackerAdd' !== $_GET['page'] && ( ( ( isset( $_GET['id'] ) && ! empty( $_GET['id'] ) ) || ( isset( $_GET['dashboard'] ) && ! empty( $_GET['dashboard'] ) ) || ( isset( $_GET['updateid'] ) && ! empty( $_GET['updateid'] ) ) || ( isset( $_GET['monitor_wpid'] ) && ! empty( $_GET['monitor_wpid'] ) ) || ( isset( $_GET['emailsettingsid'] ) && ! empty( $_GET['emailsettingsid'] ) ) || ( isset( $_GET['scanid'] ) && ! empty( $_GET['scanid'] ) ) ) || ( 'ServerInformation' === $_GET['page'] || 'ServerInformationCron' === $_GET['page'] || 'ErrorLog' === $_GET['page'] || 'ActionLogs' === $_GET['page'] || 'PluginPrivacy' === $_GET['page'] || 'Settings' === $_GET['page'] || 'SettingsAdvanced' === $_GET['page'] || 'SettingsEmail' === $_GET['page'] || 'EarlyUpdates' === $_GET['page'] || 'MainWPTools' === $_GET['page'] || 'SettingsInsights' === $_GET['page'] || 'SettingsApiBackups' === $_GET['page'] ) ) ) {
             return true;
         }
         //phpcs:enable
@@ -689,6 +652,7 @@ class MainWP_System { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
         }
 
         MainWP_System_Handler::instance()->handle_settings_post();
+        MainWP_System_Handler::instance()->handle_early_updates_access_settings();
     }
 
     /**
