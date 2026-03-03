@@ -7,6 +7,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 // phpcs:disable WordPress.DB.RestrictedFunctions, WordPress.WP.AlternativeFunctions, WordPress.PHP.NoSilencedErrors, Generic.Metrics.CyclomaticComplexity -- Using cURL functions.
 
 /**
@@ -256,8 +261,20 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
         global $wp_filesystem;
 
         $upload_dir = wp_upload_dir();
-        $dir        = $upload_dir['basedir'] . DIRECTORY_SEPARATOR . 'mainwp' . DIRECTORY_SEPARATOR;
-        $url        = $upload_dir['baseurl'] . '/mainwp/';
+
+        /**
+         * Allow filtering the upload directory array used by MainWP.
+         *
+         * @since 5.4.1.
+         *
+         * @param array  $upload_dir Array of upload directory info (from wp_upload_dir()).
+         * @param string $subdir      Optional. Sub Directory requested.
+         * @param bool $direct_access Optional. Direct access.
+         */
+        $upload_dir = apply_filters( 'mainwp_get_wp_upload_dir', $upload_dir, $subdir, $direct_access );
+
+        $dir = $upload_dir['basedir'] . DIRECTORY_SEPARATOR . 'mainwp' . DIRECTORY_SEPARATOR;
+        $url = $upload_dir['baseurl'] . '/mainwp/';
         if ( ! $wp_filesystem->exists( $dir ) ) {
             $wp_filesystem->mkdir( $dir, 0777 );
         }
@@ -662,7 +679,7 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
 
                     if ( isset( $tags_ids[ $idx ] ) && ! empty( $tags_ids[ $idx ] ) ) {
                         $tag_id       = $tags_ids[ $idx ];
-                        $tags_labels .= '<span ' . $tag_style . ' class="ui tag mini label"><a ' . $tag_a_style . ' href="' . esc_url( $href . $tag_id ) . '">' . esc_html( $tag ) . '</a></span>';
+                        $tags_labels .= '<span ' . $tag_style . ' tag_id="' . $tag_id . '" class="ui tag mini label"><a ' . $tag_a_style . ' href="' . esc_url( $href . $tag_id ) . '">' . esc_html( $tag ) . '</a></span>';
                     } else {
                         $tags_labels .= '<span ' . $tag_style . ' class="ui tag mini label">' . esc_html( $tag ) . '</span>';
                     }
@@ -714,7 +731,7 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
 
                     if ( isset( $tags_ids[ $idx ] ) && ! empty( $tags_ids[ $idx ] ) ) {
                         $tag_id       = $tags_ids[ $idx ];
-                        $tags_labels .= '<span ' . $tag_style . ' class="ui tag mini label"><a ' . $tag_a_style . ' href="' . esc_url( $href . $tag_id ) . '">' . esc_html( $tag ) . '</a></span>';
+                        $tags_labels .= '<span ' . $tag_style . ' tag_id="' . $tag_id . '" class="ui tag mini label"><a ' . $tag_a_style . ' href="' . esc_url( $href . $tag_id ) . '">' . esc_html( $tag ) . '</a></span>';
                     } else {
                         $tags_labels .= '<span ' . $tag_style . ' class="ui tag mini label">' . esc_html( $tag ) . '</span>';
                     }
@@ -1154,6 +1171,9 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
         // update cache.
         $cached_icons[ $slug ] = $value;
 
+        /**
+         * @since 5.4.0.18
+         */
         $cached_icons = apply_filters( 'mainwp_before_save_cached_icons', $cached_icons, $icon, $slug, $type, $custom_icon, $noexp );
 
         MainWP_DB::instance()->update_general_option( $option_name, $cached_icons, 'array' );
@@ -1484,6 +1504,13 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
         $base_dir = $dirs[0];
         $base_url = $dirs[1];
 
+        /**
+         * WordPress files system object.
+         *
+         * @global object
+         */
+        global $wp_filesystem;
+
         $output   = array();
         $filename = '';
         $filepath = '';
@@ -1533,7 +1560,7 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
                     $dest_file = $base_dir . '/' . $file_name;
                     $dest_file = dirname( $dest_file ) . '/' . wp_unique_filename( dirname( $dest_file ), basename( $dest_file ) );
 
-                    if ( move_uploaded_file( $tmp_file, $dest_file ) ) {
+                    if ( $wp_filesystem->put_contents( $dest_file, $wp_filesystem->get_contents( $tmp_file ) ) ) {
                         if ( file_exists( $dest_file ) ) {
                             list( $width, $height ) = getimagesize( $dest_file );
                         }
@@ -1778,5 +1805,33 @@ class MainWP_System_Utility { // phpcs:ignore Generic.Classes.OpeningBraceSameLi
             return false;
         }
         return wp_verify_nonce( $nonce, $type . '-' . $current_user->ID . '-' . $slug );
+    }
+
+
+    /**
+     * Method get_http_version_const_str().
+     *
+     * @param  int $http_ver_int Version value.
+     *
+     * @return string Version const string.
+     */
+    public static function get_http_version_const_str( $http_ver_int ) {
+        $const_names = array(
+            'CURL_HTTP_VERSION_1_0',
+            'CURL_HTTP_VERSION_1_1',
+            'CURL_HTTP_VERSION_2',
+            'CURL_HTTP_VERSION_2TLS',
+            'CURL_HTTP_VERSION_2_0',
+            'CURL_HTTP_VERSION_2_PRIOR_KNOWLEDGE',
+            'CURL_HTTP_VERSION_3',
+            'CURL_HTTP_VERSION_3ONLY',
+            'CURL_HTTP_VERSION_NONE',
+        );
+        foreach ( $const_names as $const ) {
+            if ( defined( $const ) && constant( $const ) === $http_ver_int ) {
+                    return $const;
+            }
+        }
+        return $http_ver_int;
     }
 }

@@ -25,6 +25,11 @@ use MainWP\Dashboard\MainWP_Error_Helper;
 use MainWP\Dashboard\MainWP_Exception;
 use Exception;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 /**
  * Class Rest_Api_V1
  *
@@ -670,6 +675,7 @@ class Rest_Api_V1 { //phpcs:ignore -- NOSONAR - multi methods.
         $method = $request->get_method();
 
         if ( empty( $allow_methods ) || ! in_array( $method, $allow_methods ) ) {
+            /* translators: %s: HTTP method name */
             throw new MainWP_Exception( sprintf( esc_html__( 'Sorry, you are not allowed to do the %s method.', 'mainwp' ), ( isset( $methods_map[ $method ] ) ? $methods_map[ $method ] : '' ) ) ); //phpcs:ignore WordPress.Security.EscapeOutput.ExceptionNotEscaped
         }
 

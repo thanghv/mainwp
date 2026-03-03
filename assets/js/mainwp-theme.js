@@ -2,7 +2,7 @@
 // current complexity is the only way to achieve desired results, pull request solutions appreciated.
 
 /* global _mainwpThemeSettings, confirm */
-window.wp = window.wp || {};
+globalThis.wp = globalThis.wp || {};
 
 (function ($) {
 
@@ -53,7 +53,7 @@ window.wp = window.wp || {};
 
         el: '#wpbody-content .mainwp-browse-themes',
 
-        window: $(window),
+        window: $(globalThis.window),
         // Pagination instance
         page: 0,
 
@@ -115,11 +115,8 @@ window.wp = window.wp || {};
         // Checks when the user gets close to the bottom
         // of the mage and triggers a theme:scroll event
         scroller: function () {
-            let self = this,
-                bottom, threshold;
-
-            bottom = this.window.scrollTop() + self.window.height();
-            threshold = self.$el.offset().top + self.$el.outerHeight(false) - self.window.height();
+            const bottom = this.window.scrollTop() + this.window.height();
+            let threshold = this.$el.offset().top + this.$el.outerHeight(false) - this.window.height();
             threshold = Math.round(threshold * 0.9);
 
             if (bottom > threshold) {
@@ -209,15 +206,13 @@ window.wp = window.wp || {};
 
         // Paginates the collection with a helper method
         // that slices the collection
-        paginate: function (instance) {
-            let collection = this;
-            instance = instance || 0;
-
-            // Themes per instance are set at 20
-            collection = _(collection.rest(20 * instance));
+        paginate: function (instance = 0) {
+             // Themes per instance are set at 20
+            let collection = _(this.rest(20 * instance));
             collection = _(collection.first(20));
 
             return collection;
+
         },
 
         count: false,
@@ -858,7 +853,7 @@ window.wp = window.wp || {};
     // a wrapper that will hold all the theme elements
     themes.view.Themes = wp.Backbone.View.extend({
 
-        className: 'themes ui four cards',
+        className: 'themes ui three cards',
         $overlay: $('div.theme-overlay'),
 
         // Number to keep track of scroll position
@@ -1145,7 +1140,7 @@ window.wp = window.wp || {};
 
 
         attributes: {
-            placeholder: __('Search themes...'),
+            placeholder: 'Search themes...',
             type: 'text',
             'aria-describedby': 'live-search-desc'
         },
@@ -1567,8 +1562,8 @@ window.wp = window.wp || {};
                 $('.mainwp-bulk-install-showhide-content').hide();
                 $('.mainwp-upload-theme').show();
                 themes.router.navigate(themes.router.baseUrl('&upload'), { replace: true });
-                $(this).addClass('mainwp_action_down');
-                $('a.browse-themes').removeClass('mainwp_action_down');
+                $('a.mainwp-bulk-install-tabs-header-btn').removeClass('green');
+                $(this).addClass('green');
                 $('#mainwp_theme_bulk_install_btn').attr('bulk-action', 'upload');
             });
             $('a.browse-themes').on('click', function (event) {
@@ -1577,8 +1572,8 @@ window.wp = window.wp || {};
                 $('#mainwp-search-themes-input-container').show();
                 $('#theme-filter').show();
                 themes.router.navigate(themes.router.baseUrl(''), { replace: true });
-                $(this).addClass('mainwp_action_down');
-                $('a.upload').removeClass('mainwp_action_down');
+                $('a.mainwp-bulk-install-tabs-header-btn').removeClass('green');
+                $(this).addClass('green');
                 $('#mainwp_theme_bulk_install_btn').attr('bulk-action', 'install');
             });
         },
@@ -1756,15 +1751,18 @@ jQuery(function($) {
             adminbar_height = 0;
 
         if ($('#wpadminbar').length) {
-            adminbar_height = parseInt($('#wpadminbar').css('height'), 10);
+            adminbar_height =  Number.parseInt($('#wpadminbar').css('height'), 10);
         }
 
         if (tbWindow.length) {
             tbWindow.width(W - 50).height(H - 45 - adminbar_height);
             $('#TB_iframeContent').width(W - 50).height(H - 75 - adminbar_height);
-            tbWindow.css({ 'margin-left': '-' + parseInt(((W - 50) / 2), 10) + 'px' });
-            if (typeof document.body.style.maxWidth !== 'undefined') {
-                tbWindow.css({ 'top': 20 + adminbar_height + 'px', 'margin-top': '0' });
+            tbWindow.css({ 'margin-left': '-' +  Number.parseInt(((W - 50) / 2), 10) + 'px' });
+            if ('maxWidth' in document.body.style) {
+                tbWindow.css({
+                    top: `${20 + adminbar_height}px`,
+                    marginTop: 0
+                });
             }
         }
     };

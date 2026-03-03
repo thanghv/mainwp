@@ -7,6 +7,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 // phpcs:disable Generic.Metrics.CyclomaticComplexity -- complexity.
 
 /**
@@ -99,6 +104,20 @@ class MainWP_Hooks { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conten
         add_filter( 'mainwp-extension-available-check', array( MainWP_Extensions_Handler::get_class_name(), 'is_extension_available' ) );
         add_filter( 'mainwp_extension_is_activated', array( &$this, 'is_extension_activated' ), 10, 2 );
         add_filter( 'mainwp_extension_is_pro_member', array( &$this, 'is_pro_member' ), 10, 1 );
+
+        /**
+         * Handle get avaiable add-ons.
+         *
+         * @since 6.0
+         */
+        add_filter(
+            'mainwp_get_avaiable_add_ons',
+            function () {
+                return MainWP_Extensions_View::get_available_extensions( 'all' );
+            },
+            10,
+            1
+        );
 
         /**
          * Logging debug actions.
@@ -539,7 +558,7 @@ class MainWP_Hooks { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conten
                 return false;
             }
         }
-
+        // translators: 1: Opening anchor tag, 2: Closing anchor tag.
         return sprintf( esc_html__( 'You have a MainWP extension that does not have an active API entered. This means you will not receive updates or support. Please visit the %1$sExtensions%2$s page and enter your API key.', 'mainwp' ), '<a href="admin.php?page=Extensions">', '</a>' );
     }
 
@@ -1454,10 +1473,6 @@ class MainWP_Hooks { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conten
                 * @since 4.1
                 */
                 do_action( 'mainwp_after_plugin_theme_translation_update', $information, $type, implode( ',', $slugs ), $website );
-
-                if ( isset( $information['sync'] ) ) {
-                    unset( $information['sync'] );
-                }
                 wp_send_json( $information );
             }
         } catch ( MainWP_Exception $e ) {
@@ -1519,7 +1534,7 @@ class MainWP_Hooks { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conten
      */
     public function hook_atarim_default_sitestable_column( $columns ) {
         if ( ! is_plugin_active( 'mainwp-atarim-extension/mainwp-atarim-extension.php' ) ) {
-            $columns['atarim_tasks'] = esc_html__( 'Atarim', 'mainwp-atarim-extension' );
+            $columns['atarim_tasks'] = esc_html__( 'Atarim', 'mainwp' );
         }
         return $columns;
     }

@@ -7,6 +7,11 @@
  * @package     MainWP/Dashboard
  */
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 if ( ! defined( 'FILTER_SANITIZE_STRING_COMPATIBLE' ) ) {  // to compatible.
     define( 'FILTER_SANITIZE_STRING_COMPATIBLE', 513 );
 }
@@ -34,6 +39,7 @@ if ( ! function_exists( '\mainwp_do_not_have_permissions' ) ) {
      * @return string|bool $msg|false
      */
     function mainwp_do_not_have_permissions( $where = '', $echo_out = true ) {
+        /* translators: %s: Page or section name where access was denied */
         $msg = sprintf( esc_html__( 'You do not have sufficient permissions to access this page (%s).', 'mainwp' ), ucwords( $where ) );
         if ( $echo_out ) {
             echo '<div class="mainwp-permission-error"><p>' . esc_html( $msg ) . '</p>If you need access to this page please contact the dashboard administrator.</div>';
@@ -85,7 +91,7 @@ if ( ! function_exists( 'mainwp_send_json_output' ) ) {
      */
     function mainwp_send_json_output( $output ) {
         if ( is_array( $output ) ) {
-            $output['execute_time'] = \MainWP\Dashboard\MainWP_Execution_Helper::instance()->get_exec_time();
+            $output['execute_time'] = \MainWP\Dashboard\MainWP_Execution_Helper::get_run_time();
         }
         wp_send_json( $output );
     }

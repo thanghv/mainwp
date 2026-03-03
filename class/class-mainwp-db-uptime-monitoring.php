@@ -9,6 +9,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 /**
  * Class MainWP_DB_Uptime_Monitoring
  *
@@ -76,7 +81,8 @@ wpid int(11) NOT NULL,
 `dts_auto_monitoring_time` int(11) NOT NULL DEFAULT 0,
 `dts_auto_monitoring_start` int(11) NOT NULL DEFAULT 0,
 `dts_auto_monitoring_retry_time` int(11) NOT NULL DEFAULT 0,
-KEY idx_wpid (wpid)";
+KEY idx_wpid (wpid),
+KEY idx_wpid_issub (wpid, issub)";
         if ( empty( $currentVersion ) || version_compare( $currentVersion, '9.0.0.41', '<' ) ) { // NOSONAR - no ip.
             $tbl .= ',
     PRIMARY KEY (monitor_id) ';
@@ -140,6 +146,11 @@ KEY idx_wpid (wpid)";
         $suppress = $this->wpdb->suppress_errors();
         $this->update_db_90041( $current_version );
         $this->update_db_90043( $current_version );
+
+        if ( ! empty( $current_version ) && version_compare( $current_version, '9.0.1.2', '<' ) ) { // NOSONAR - no ip.
+            $this->wpdb->query( 'ALTER TABLE ' . $this->table_name( 'monitors' ) . ' ADD INDEX idx_wpid_issub (wpid, issub)' ); //phpcs:ignore -- ok.
+        }
+
         $this->wpdb->suppress_errors( $suppress );
     }
 
@@ -172,7 +183,7 @@ KEY idx_wpid (wpid)";
                 $global_settings['up_status_codes'] = $ignored_codes;
             }
 
-            $legacy_enabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( true ) );
+            $legacy_enabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( true ) ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
 
             if ( $legacy_enabled_monitors ) {
                 foreach ( $legacy_enabled_monitors as $mo ) {
@@ -190,7 +201,7 @@ KEY idx_wpid (wpid)";
                 }
             }
 
-            $legacy_disabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( false ) );
+            $legacy_disabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( false ) ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
 
             if ( $legacy_disabled_monitors ) {
                 if ( ! $disableSitesMonitoring ) {
@@ -206,10 +217,14 @@ KEY idx_wpid (wpid)";
             delete_option( 'mainwp_disableSitesChecking' );
             delete_option( 'mainwp_ignore_HTTP_response_status' );
 
-            $delColumns = array( 'status_check_interval' );
+            $delColumns       = array( 'status_check_interval' );
+            $table_wp         = esc_sql( $this->table_name( 'wp' ) );
+            $existing_columns = $this->wpdb->get_col( "SHOW COLUMNS FROM {$table_wp}", 0 ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- DDL introspection; table name is a hardcoded internal identifier escaped via esc_sql(), no user input involved.
 
             foreach ( $delColumns as $column ) {
-                $this->wpdb->query( 'ALTER TABLE ' . $this->table_name( 'wp' ) . ' DROP COLUMN ' . $column );
+                if ( in_array( $column, $existing_columns, true ) ) {
+                    $this->wpdb->query( 'ALTER TABLE ' . $table_wp . ' DROP COLUMN ' . esc_sql( $column ) ); // phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared, PluginCheck.Security.DirectDB.UnescapedDBParameter -- DDL statement; table and column names are hardcoded internal identifiers escaped via esc_sql(), no user input involved.
+                }
             }
         }
     }
@@ -225,7 +240,8 @@ KEY idx_wpid (wpid)";
         $update_ver  = '9.0.0.43'; // NOSONAR - no ip.
         $update_ver2 = '9.0.0.41'; // NOSONAR - no ip.
         if ( ! empty( $current_version ) && version_compare( $current_version, $update_ver, '<' ) && version_compare( $current_version, $update_ver2, '>=' ) ) {
-            $this->wpdb->query( 'ALTER TABLE ' . $this->table_name( 'wp' ) . ' CHANGE up_statuscodes_json up_status_codes text NOT NULL DEFAULT ""' ); //phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
+            $table_wp = esc_sql( $this->table_name( 'wp' ) );
+            $this->wpdb->query( 'ALTER TABLE ' . $table_wp . ' CHANGE up_statuscodes_json up_status_codes text NOT NULL DEFAULT ""' ); //phpcs:ignore WordPress.DB.PreparedSQL.NotPrepared
         }
 
         $update_ver3 = '9.0.0.49'; // NOSONAR - no ip.
@@ -257,10 +273,11 @@ KEY idx_wpid (wpid)";
         if ( ! empty( $current_version ) && version_compare( $current_version, $update_ver, '<=' ) ) {
             $websites = MainWP_DB::instance()->query( MainWP_DB::instance()->get_sql_websites() );
             while ( $websites && ( $website  = MainWP_DB::fetch_object( $websites ) ) ) {
-                $sql = 'SELECT mo.*
-                FROM ' . $this->table_name( 'monitors' ) . ' mo
-                WHERE mo.wpid = ' . $website->id . ' AND mo.issub = 0
-                ORDER BY mo.monitor_id ASC ';
+                $table_monitors = esc_sql( $this->table_name( 'monitors' ) );
+                $sql            = $this->wpdb->prepare(
+                    'SELECT mo.* FROM ' . $table_monitors . ' mo WHERE mo.wpid = %d AND mo.issub = 0 ORDER BY mo.monitor_id ASC',
+                    intval( $website->id )
+                );
 
                 $site_mos = $this->wpdb->get_results( $sql );
 
@@ -269,13 +286,13 @@ KEY idx_wpid (wpid)";
                     foreach ( $site_mos as $mo ) {
                         if ( ! $first_mo_id ) {
                             $first_mo_id = $mo->monitor_id;
-                        } elseif ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitors' ) . ' WHERE monitor_id=%d', $mo->monitor_id ) ) ) {
+                        } elseif ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $table_monitors . ' WHERE monitor_id=%d', $mo->monitor_id ) ) ) {
                                 $this->wpdb->update(
                                     $this->table_name( 'monitor_heartbeat' ),
                                     array( 'monitor_id' => $first_mo_id ),
                                     array( 'monitor_id' => $mo->monitor_id )
                                 );
-                                $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' WHERE monitor_id=%d', $mo->monitor_id ) );
+                                $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . esc_sql( $this->table_name( 'monitor_stat_hourly' ) ) . ' WHERE monitor_id=%d', $mo->monitor_id ) );
                         }
                     }
                 }
@@ -295,7 +312,7 @@ KEY idx_wpid (wpid)";
     public function update_db_legacy_first_enable_monitoring_create_monitors( $disabled_monitors = null, $active = null ) {
 
         if ( null === $disabled_monitors ) {
-            $disabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( false ) );
+            $disabled_monitors = $this->wpdb->get_results( $this->get_legacy_sql_websites_enabled_check_status( false ) ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
         }
 
         if ( is_array( $disabled_monitors ) ) {
@@ -330,9 +347,11 @@ KEY idx_wpid (wpid)";
      * @return string SQL string.
      */
     public function get_legacy_sql_websites_enabled_check_status( $enabled ) {
-        return 'SELECT wp.id
-        FROM ' . $this->table_name( 'wp' ) . ' wp
-        WHERE wp.disable_status_check = ' . ( $enabled ? 0 : 1 ); // 0 - enabled, 1 - not enabled.
+        $table_wp = esc_sql( $this->table_name( 'wp' ) );
+        return $this->wpdb->prepare(
+            'SELECT wp.id FROM ' . $table_wp . ' wp WHERE wp.disable_status_check = %d',
+            $enabled ? 0 : 1
+        );
     }
 
 
@@ -360,7 +379,7 @@ KEY idx_wpid (wpid)";
             $params['wpid'] = $site_id;
         }
 
-        if ( in_array( $by, array( 'suburl', 'monitor_id', 'issub' ), true ) ) {
+        if ( in_array( $by, array( 'suburl', 'monitor_id', 'issub', 'wpid' ), true ) ) {
             $params[ $by ] = $value;
         } else {
             return false;
@@ -396,7 +415,7 @@ KEY idx_wpid (wpid)";
 
         $this->log_system_query( $params, $sql );
 
-        return $this->wpdb->get_results( $sql, ARRAY_A );
+        return $this->wpdb->get_results( $sql, ARRAY_A ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL built with esc_sql() table names.
     }
 
 
@@ -408,11 +427,63 @@ KEY idx_wpid (wpid)";
      *
      * @return object|null Database query results or null on failure.
      */
-    public function get_monitors( $params = array(), $obj = OBJECT ) {
+    public function get_monitors( $params = array(), $obj = OBJECT ) { // phpcs:ignore -- NOSONAR - complexity.
+        if ( ! is_array( $params ) ) {
+            $params = array();
+        }
+
+        // Initialize custom_where if it does not exist.
+        if ( empty( $params['custom_where'] ) ) {
+            $params['custom_where'] = '';
+        }
+
+        // Handel exclude.
+        if ( isset( $params['exclude'] ) && ! empty( $params['exclude'] ) ) {
+            $exclude_ids             = wp_parse_id_list( $params['exclude'] );
+            $params['custom_where'] .= empty( $exclude_ids ) ? '' : ' AND mo.monitor_id NOT IN (' . implode( ',', $exclude_ids ) . ')';
+        }
+
+        // Handel include.
+        if ( isset( $params['include'] ) && ! empty( $params['include'] ) ) {
+            $include_ids             = wp_parse_id_list( $params['include'] );
+            $params['custom_where'] .= empty( $include_ids ) ? '' : ' AND mo.monitor_id  IN (' . implode( ',', $include_ids ) . ')';
+        }
+
+        // Handel status.
+        if ( isset( $params['status'] ) ) {
+            if ( is_numeric( $params['status'] ) && -1 !== (int) $params['status'] ) {
+                $params['custom_where'] .= ' AND wp.offline_check_result = ' . $params['status'];
+            } elseif ( -1 === (int) $params['status'] ) {
+                $params['custom_where'] .= ' AND wp.offline_check_result = -1';
+            }
+        }
+
+        // Handel search.
+        if ( isset( $params['search'] ) && ! empty( $params['search'] ) ) {
+            $search_term             = $this->escape( htmlspecialchars( $params['search'] ) );
+            $params['custom_where'] .= ' AND (wp.name LIKE "%' . $search_term . '%" OR wp.url LIKE "%' . $search_term . '%" OR mo.suburl LIKE "%' . $search_term . '%")';
+        }
+
+        // Handel page and per_page.
+        $page     = '';
+        $per_page = '';
+        if ( isset( $params['page'] ) && ! empty( $params['page'] ) ) {
+            $page = (int) $params['page'];
+        }
+
+        if ( isset( $params['per_page'] ) && ! empty( $params['per_page'] ) ) {
+            $per_page = (int) $params['per_page'];
+        }
+
+        if ( ! empty( $page ) && ! empty( $per_page ) ) {
+            $params['str_limit'] = ' LIMIT ' . ( $page - 1 ) * $per_page . ', ' . $per_page;
+        }
+
         if ( empty( $params['view'] ) ) {
             $params['view'] = 'monitor_view';
         }
-        return $this->wpdb->get_results( $this->get_sql_monitor( $params ), $obj );
+
+        return $this->wpdb->get_results( $this->get_sql_monitor( $params ), $obj ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL built with esc_sql().
     }
 
     /**
@@ -429,8 +500,8 @@ KEY idx_wpid (wpid)";
         $local_timestamp  = mainwp_get_timestamp();
         $lasttime_counter = isset( $params['main_counter_lasttime'] ) ? intval( $params['main_counter_lasttime'] ) : 0;
         $glo_settings     = isset( $params['global_settings'] ) && is_array( $params['global_settings'] ) ? $params['global_settings'] : array();
+        $limit            = isset( $params['limit'] ) ? intval( $params['limit'] ) : 10;
 
-        $limit        = isset( $glo_settings['limit'] ) ? intval( $glo_settings['limit'] ) : 10;
         $glo_interval = isset( $glo_settings['interval'] ) ? intval( $glo_settings['interval'] ) : 60; // mins.
 
         if ( empty( $glo_interval ) ) {
@@ -489,7 +560,7 @@ KEY idx_wpid (wpid)";
 
         $this->log_system_query( $params, $sql );
 
-        return $this->wpdb->get_results( $sql, OBJECT );
+        return $this->wpdb->get_results( $sql, OBJECT ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL built with esc_sql() table names.
     }
 
     /**
@@ -498,22 +569,28 @@ KEY idx_wpid (wpid)";
      * @return int
      */
     public function count_monitors_individual_active_enabled() {
-        return $this->wpdb->get_var( 'SELECT count(*) FROM ' . $this->table_name( 'monitors' ) . ' WHERE active = 1 ' );
+        $table_monitors = esc_sql( $this->table_name( 'monitors' ) );
+        return $this->wpdb->get_var( 'SELECT count(*) FROM ' . $table_monitors . ' WHERE active = 1 ' );
     }
 
     /**
      * Get uptime notifcation to send.
      *
      * @param  int $limit limit.
+     * @param  int $global_active global active.
+     *
      * @return mixed
      */
-    public function get_uptime_notification_to_start_send( $limit = 50 ) {
+    public function get_uptime_notification_to_start_send( $limit = 50, $global_active = 1 ) {
+        $table_monitors           = esc_sql( $this->table_name( 'monitors' ) );
+        $table_schedule_processes = esc_sql( $this->table_name( 'schedule_processes' ) );
 
         $sql = $this->wpdb->prepare(
-            ' SELECT pro.process_id,pro.status,pro.dts_process_start,pro.dts_process_stop,mo.* FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'schedule_processes' ) . ' pro ON mo.monitor_id = pro.item_id ' .
+            ' SELECT pro.process_id,pro.status,pro.dts_process_start,pro.dts_process_stop,mo.* FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_schedule_processes . ' pro ON mo.monitor_id = pro.item_id ' .
             " WHERE ( pro.type = 'monitor' AND pro.process_slug = 'uptime_notification' " .
-            " AND ( pro.dts_process_stop > pro.dts_process_start OR pro.dts_process_start = 0 ) AND pro.status = 'active' ) " . // get active process and stop > start - it is finished status of previous process.
+            ' AND ( ( mo.active = -1 AND 1 = ' . ( $global_active ? 1 : 0 ) . ' ) OR mo.active = 1  ) ' .
+            " AND ( pro.dts_process_stop > pro.dts_process_start OR pro.dts_process_start = 0 ) AND pro.status = 'active' ) " .
             ' ORDER BY pro.dts_process_start ASC LIMIT %d ',
             $limit
         );
@@ -540,7 +617,7 @@ KEY idx_wpid (wpid)";
 
         $this->log_system_query( $params, $sql );
 
-        return $this->wpdb->get_results( $sql );
+        return $this->wpdb->get_results( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL built with esc_sql() table names.
     }
 
     /**
@@ -557,13 +634,15 @@ KEY idx_wpid (wpid)";
             return false;
         }
 
-        $hb_time = gmdate( 'Y-m-d H:i:S', $hb_timestamp );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+        $hb_time                 = gmdate( 'Y-m-d H:i:S', $hb_timestamp );
 
         $sql = $this->wpdb->prepare(
-            'SELECT he.* FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
-            ' WHERE he.monitor_id = %d AND ( he.status = 0 OR he.status = 1 ) AND he.time >= "' . $this->escape( $hb_time ) . '" ' .
+            'SELECT he.* FROM ' . $table_monitor_heartbeat . ' he ' .
+            ' WHERE he.monitor_id = %d AND ( he.status = 0 OR he.status = 1 ) AND he.time >= %s ' .
             ' AND he.importance = 1 ORDER BY he.heartbeat_id ASC ',
-            $mo_id
+            $mo_id,
+            $hb_time
         );
         return $this->wpdb->get_results( $sql );
     }
@@ -575,7 +654,7 @@ KEY idx_wpid (wpid)";
      *
      * @return object|null Database query results or null on failure.
      */
-    public function update_wp_monitor( $data ) {
+    public function update_wp_monitor( $data ) { // phpcs:ignore -- NOSONAR - complexity.
         if ( ! is_array( $data ) ) {
             return false;
         }
@@ -588,9 +667,21 @@ KEY idx_wpid (wpid)";
             }
         }
 
+        if ( ! isset( $data['monitor_id'] ) && ! empty( $data['wpid'] ) ) {
+            $check = $this->get_monitor_by( $data['wpid'], 'issub', 0 );
+            if ( ! empty( $check ) ) {
+                $data['monitor_id'] = $check->monitor_id;
+            }
+        }
+
         if ( isset( $data['monitor_id'] ) ) {
             $id = $data['monitor_id'];
             unset( $data['monitor_id'] );
+
+            if ( isset( $data['wpid'] ) ) { // Do not update or change this field.
+                unset( $data['wpid'] );
+            }
+
             $this->wpdb->update(
                 $this->table_name( 'monitors' ),
                 $data,
@@ -610,6 +701,21 @@ KEY idx_wpid (wpid)";
     }
 
     /**
+     * Update site monitor increase retries.
+     *
+     * @param array $data data.
+     *
+     * @return bool Database query results or false.
+     */
+    public function update_monitor_increase_retry( $monitor_id ) {
+        if ( empty( $monitor_id ) ) {
+            return false;
+        }
+        $table_monitors = esc_sql( $this->table_name( 'monitors' ) );
+        return $this->wpdb->query( $this->wpdb->prepare( 'UPDATE ' . $table_monitors . ' SET retries = retries + 1 WHERE monitor_id=%d', $monitor_id ) );
+    }
+
+    /**
      * Get child site monitor by id via SQL.
      *
      * @param array $params params.
@@ -622,9 +728,16 @@ KEY idx_wpid (wpid)";
             $params = array();
         }
 
+        $table_wp                 = esc_sql( $this->table_name( 'wp' ) );
+        $table_wp_sync            = esc_sql( $this->table_name( 'wp_sync' ) );
+        $table_monitors           = esc_sql( $this->table_name( 'monitors' ) );
+        $table_wp_clients         = esc_sql( $this->table_name( 'wp_clients' ) );
+        $table_wp_group           = esc_sql( $this->table_name( 'wp_group' ) );
+        $table_group              = esc_sql( $this->table_name( 'group' ) );
+        $table_schedule_processes = esc_sql( $this->table_name( 'schedule_processes' ) );
+
         $view = ! empty( $params['view'] ) ? $params['view'] : 'default';
 
-        // deprecated: Use 'others_fields' as a replacement.
         $extra_view = ! empty( $params['extra_view'] ) ? $params['extra_view'] : array();
 
         $site_id   = isset( $params['wpid'] ) ? intval( $params['wpid'] ) : false;
@@ -638,10 +751,9 @@ KEY idx_wpid (wpid)";
         $is_staging    = isset( $params['is_staging'] ) && in_array( $params['is_staging'], array( 'yes', 'no' ) ) ? $params['is_staging'] : 'no';
         $others_fields = isset( $params['others_fields'] ) && is_array( $params['others_fields'] ) ? $params['others_fields'] : array( 'favi_icon' );
         $for_manager   = isset( $params['for_manager'] ) && $params['for_manager'] ? true : false;
-        $custom_where  = ! empty( $params['custom_where'] ) ? $params['custom_where'] : ''; // requires: custom_where validated.
+        $custom_where  = ! empty( $params['custom_where'] ) ? $params['custom_where'] : '';
         $order_by      = isset( $params['order_by'] ) && ! empty( $params['order_by'] ) ? $params['order_by'] : '';
 
-        // to compatible.
         if ( ! empty( $extra_view ) && is_array( $extra_view ) && is_array( $others_fields ) ) {
             $others_fields = array_unique( array_merge( $extra_view, $others_fields ) );
         }
@@ -651,7 +763,7 @@ KEY idx_wpid (wpid)";
 
         if ( $with_clients ) {
             $select_clients = ', wpclient.name as client_name ';
-            $join_clients   = ' LEFT JOIN ' . $this->table_name( 'wp_clients' ) . ' wpclient ON wp.client_id = wpclient.client_id ';
+            $join_clients   = ' LEFT JOIN ' . $table_wp_clients . ' wpclient ON wp.client_id = wpclient.client_id ';
         }
 
         $where = '';
@@ -669,7 +781,7 @@ KEY idx_wpid (wpid)";
         }
 
         if ( false !== $is_sub ) {
-            $where .= ' AND mo.issub = ' . intval( $is_sub ); // If $is_sub is 0, it indicates the main monitor.
+            $where .= ' AND mo.issub = ' . intval( $is_sub );
         }
 
         if ( ! $for_manager ) {
@@ -690,7 +802,6 @@ KEY idx_wpid (wpid)";
             'wp.pubkey',
             'wp.wpe',
             'wp.is_staging',
-            'wp.pubkey',
             'wp.force_use_ipv4',
             'wp.siteurl',
             'wp.suspended',
@@ -743,19 +854,18 @@ KEY idx_wpid (wpid)";
         $select_groups = '';
         $join_groups   = '';
 
-        // wpgroups to fix issue for mysql 8.0, as groups will generate error syntax.
         if ( $select_grps ) {
             $select_groups = ', GROUP_CONCAT(gr.name ORDER BY gr.name SEPARATOR ",") as wpgroups, GROUP_CONCAT(gr.id ORDER BY gr.name SEPARATOR ",") as wpgroupids, GROUP_CONCAT(gr.color ORDER BY gr.name SEPARATOR ",") as wpgroups_colors, ';
             $join_groups   = '
-            LEFT JOIN ' . $this->table_name( 'wp_group' ) . ' wpgr ON wp.id = wpgr.wpid
-            LEFT JOIN ' . $this->table_name( 'group' ) . ' gr ON wpgr.groupid = gr.id';
+            LEFT JOIN ' . $table_wp_group . ' wpgr ON wp.id = wpgr.wpid
+            LEFT JOIN ' . $table_group . ' gr ON wpgr.groupid = gr.id';
         }
 
-        $join_monitors = 'LEFT JOIN ' . $this->table_name( 'monitors' ) . ' mo ON wp.id = mo.wpid';
+        $join_monitors = 'LEFT JOIN ' . $table_monitors . ' mo ON wp.id = mo.wpid';
         $join_process  = '';
 
         if ( 'uptime_notification' === $view ) {
-            $join_process = ' LEFT JOIN ' . $this->table_name( 'schedule_processes' ) . ' pro ON mo.monitor_id = pro.item_id ';
+            $join_process = ' LEFT JOIN ' . $table_schedule_processes . ' pro ON mo.monitor_id = pro.item_id ';
         }
 
         if ( ! empty( $params['count_only'] ) ) {
@@ -773,13 +883,18 @@ KEY idx_wpid (wpid)";
             $limit_str = ' LIMIT ' . intval( $limit );
         }
 
+        // Handle page and per_page.
+        if ( ! empty( $params['str_limit'] ) ) {
+            $limit_str = $params['str_limit'];
+        }
+
         $qry = 'SELECT ' . $select . '
-            FROM ' . $this->table_name( 'wp' ) . ' wp
+            FROM ' . $table_wp . ' wp
             ' . $join_clients . '
             ' . $join_groups . '
             ' . $join_monitors . '
             ' . $join_process . '
-            JOIN ' . $this->table_name( 'wp_sync' ) . ' wp_sync ON wp.id = wp_sync.wpid
+            JOIN ' . $table_wp_sync . ' wp_sync ON wp.id = wp_sync.wpid
             JOIN ' . $this->get_option_view_by( $view, $others_fields ) . ' wp_optionview ON wp.id = wp_optionview.wpid
             WHERE 1 ' . $where . $custom_where . '
             GROUP BY mo.monitor_id ORDER BY ' . $order_by . $limit_str;
@@ -803,16 +918,19 @@ KEY idx_wpid (wpid)";
             return false;
         }
 
+        $table_monitors = esc_sql( $this->table_name( 'monitors' ) );
+        $sql            = '';
+
         if ( ! empty( $params['monitor_id'] ) ) {
-            $sql = $this->wpdb->prepare( 'SELECT monitor_id, wpid FROM ' . $this->table_name( 'monitors' ) . ' WHERE monitor_id=%d', $params['monitor_id'] );
+            $sql = $this->wpdb->prepare( 'SELECT monitor_id, wpid FROM ' . $table_monitors . ' WHERE monitor_id=%d', $params['monitor_id'] );
         } elseif ( ! empty( $params['wpid'] ) ) {
-            $sql = $this->wpdb->prepare( 'SELECT monitor_id, wpid FROM ' . $this->table_name( 'monitors' ) . ' WHERE wpid=%d AND issub = 0 ', $params['wpid'] ); // get primary monitor.
+            $sql = $this->wpdb->prepare( 'SELECT monitor_id, wpid FROM ' . $table_monitors . ' WHERE wpid=%d AND issub = 0 ', $params['wpid'] );
         }
 
         $current = 0;
 
         if ( ! empty( $sql ) ) {
-            $current = $this->wpdb->get_row( $sql );
+            $current = $this->wpdb->get_row( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
         }
 
         if ( empty( $current ) ) {
@@ -822,9 +940,8 @@ KEY idx_wpid (wpid)";
         $monitor_id = $current->monitor_id;
         $wp_id      = $current->wpid;
 
-        // if it is sub page, delete the monitor only.
-        if ( ! empty( $current->issub ) ) { // it is sub page.
-            if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitors' ) . ' WHERE monitor_id=%d', $monitor_id ) ) ) {
+        if ( ! empty( $current->issub ) ) {
+            if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $table_monitors . ' WHERE monitor_id=%d', $monitor_id ) ) ) {
                 $this->delete_heartbeat( $monitor_id );
                 $this->delete_stats( $monitor_id );
                 return true;
@@ -832,12 +949,11 @@ KEY idx_wpid (wpid)";
             return false;
         }
 
-        // if it is primary monitor, delete sub pages too.
-        $sql      = $this->wpdb->prepare( 'SELECT monitor_id FROM ' . $this->table_name( 'monitors' ) . ' WHERE wpid=%d ', $wp_id );
-        $monitors = $this->wpdb->get_results( $sql );
+        $sql      = $this->wpdb->prepare( 'SELECT monitor_id FROM ' . $table_monitors . ' WHERE wpid=%d ', $wp_id );
+        $monitors = $this->wpdb->get_results( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
         if ( $monitors ) {
             foreach ( $monitors as $mo ) {
-                if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitors' ) . ' WHERE monitor_id=%d', $mo->monitor_id ) ) ) {
+                if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $table_monitors . ' WHERE monitor_id=%d', $mo->monitor_id ) ) ) {
                     $this->delete_heartbeat( $mo->monitor_id );
                     $this->delete_stats( $mo->monitor_id );
                 }
@@ -858,7 +974,8 @@ KEY idx_wpid (wpid)";
             return false;
         }
 
-        if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' WHERE monitor_id=%d', $monitorid ) ) ) {
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+        if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $table_monitor_heartbeat . ' WHERE monitor_id=%d', $monitorid ) ) ) {
             return true;
         }
 
@@ -904,7 +1021,8 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_previous_monitor_heartbeat( $monitor_id ) {
-        $sql = $this->wpdb->prepare( 'SELECT * FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' WHERE monitor_id = %d ORDER BY time DESC LIMIT 1', $monitor_id );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+        $sql                     = $this->wpdb->prepare( 'SELECT * FROM ' . $table_monitor_heartbeat . ' WHERE monitor_id = %d ORDER BY time DESC LIMIT 1', $monitor_id );
         return $this->wpdb->get_row( $sql );
     }
 
@@ -918,21 +1036,23 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_last_site_heartbeat( $siteid, $include_suburl = true ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         if ( $include_suburl ) {
-            $where = ' AND ( mo.issub = 1 OR mo.issub = 0 ) ';  // primary and sub url monitor.
+            $where = ' AND ( mo.issub = 1 OR mo.issub = 0 ) ';
         } else {
-            $where = ' AND mo.issub = 0'; // primary monitor.
+            $where = ' AND mo.issub = 0';
         }
 
         $sql = $this->wpdb->prepare(
-            'SELECT he.*,mo.active FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            'SELECT he.*,mo.active FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d ' . $where . ' ORDER BY he.time DESC LIMIT 1',
             $siteid
         );
-        return $this->wpdb->get_row( $sql );
+        return $this->wpdb->get_row( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
     }
 
     /**
@@ -941,12 +1061,13 @@ KEY idx_wpid (wpid)";
      * @return array data.
      */
     public function get_count_up_down_monitors() {
-        $sql = ' SELECT ' .
-        ' ( SELECT count(*) FROM ' . $this->table_name( 'monitors' ) . ' up WHERE  up.last_status = 1 ) AS count_up, ' .
-        ' ( SELECT count(*) FROM ' . $this->table_name( 'monitors' ) . ' down WHERE  down.last_status = 0 ) AS count_down ' .
-        ' FROM ' . $this->table_name( 'monitors' ) . ' mo LIMIT 1';
+        $table_monitors = esc_sql( $this->table_name( 'monitors' ) );
+        $sql            = ' SELECT ' .
+        ' ( SELECT count(*) FROM ' . $table_monitors . ' up WHERE  up.last_status = 1 ) AS count_up, ' .
+        ' ( SELECT count(*) FROM ' . $table_monitors . ' down WHERE  down.last_status = 0 ) AS count_down ' .
+        ' FROM ' . $table_monitors . ' mo LIMIT 1';
 
-        return $this->wpdb->get_row( $sql, ARRAY_A );
+        return $this->wpdb->get_row( $sql, ARRAY_A ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
     }
 
 
@@ -959,6 +1080,8 @@ KEY idx_wpid (wpid)";
      * @return array data.
      */
     public function get_site_count_last_incidents( $siteid, $days_num ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         if ( empty( $days_num ) ) {
             $days_num = 1;
@@ -968,9 +1091,9 @@ KEY idx_wpid (wpid)";
 
         $sql = $this->wpdb->prepare(
             'SELECT ' .
-            ' ( SELECT count(*) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he2 WHERE he2.time > %s AND he2.monitor_id = he.monitor_id AND he2.status = 0 AND he2.importance = 1 ) AS count ' .
-            ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            ' ( SELECT count(*) FROM ' . $table_monitor_heartbeat . ' he2 WHERE he2.time > %s AND he2.monitor_id = he.monitor_id AND he2.status = 0 AND he2.importance = 1 ) AS count ' .
+            ' FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d AND mo.issub = 0 LIMIT 1',
             $start_date,
@@ -989,13 +1112,16 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_last_site_incidents_stats( $siteid ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+
         $sql = $this->wpdb->prepare(
             'SELECT ' .
-            ' ( SELECT count(*) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id AND he24.status = 0 AND he.importance = 1 ) AS total24,' .
-            ' ( SELECT count(*) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND he7.status = 0 AND he.importance = 1 ) AS total7,' .
-            ' ( SELECT count(*) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND he30.status = 0 AND he.importance = 1 ) AS total30 ' .
-            ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            ' ( SELECT count(*) FROM ' . $table_monitor_heartbeat . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id AND he24.status = 0 AND he.importance = 1 ) AS total24,' .
+            ' ( SELECT count(*) FROM ' . $table_monitor_heartbeat . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND he7.status = 0 AND he.importance = 1 ) AS total7,' .
+            ' ( SELECT count(*) FROM ' . $table_monitor_heartbeat . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND he30.status = 0 AND he.importance = 1 ) AS total30 ' .
+            ' FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d LIMIT 1',
             $siteid
@@ -1013,17 +1139,21 @@ KEY idx_wpid (wpid)";
      * @return array data.
      */
     public function get_site_incidents_stats( $siteid, $params = array() ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         $start = isset( $params['start'] ) ? $params['start'] . ' 00:00:00' : gmdate( 'Y-m-d 00:00:00', time() - 7 * DAY_IN_SECONDS );
         $end   = isset( $params['end'] ) ? $params['end'] . ' 23:59:59' : gmdate( 'Y-m-d 23:59:59', time() );
 
         $sql = $this->wpdb->prepare(
             'SELECT mo.wpid, mo.monitor_id, ' .
-            ' ( SELECT count(*) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he2 WHERE he2.time > "' . $this->escape( $start ) . '" AND he2.time <= "' . $this->escape( $end ) . '" AND he2.monitor_id = mo.monitor_id AND he2.status = 0 AND he2.importance = 1 ) AS count_incidents' .
-            ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            ' ( SELECT count(*) FROM ' . $table_monitor_heartbeat . ' he2 WHERE he2.time > %s AND he2.time <= %s AND he2.monitor_id = mo.monitor_id AND he2.status = 0 AND he2.importance = 1 ) AS count_incidents' .
+            ' FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d AND mo.issub = 0 LIMIT 1 ',
+            $start,
+            $end,
             $siteid
         );
 
@@ -1046,6 +1176,8 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_last_site_uptime_ratios_values( $siteid, $days_num ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         if ( empty( $days_num ) ) {
             $days_num = 1;
@@ -1055,10 +1187,10 @@ KEY idx_wpid (wpid)";
 
         $sql = $this->wpdb->prepare(
             'SELECT ' .
-            ' ( SELECT SUM(he.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he WHERE he.time > %s AND he.monitor_id = mo.monitor_id AND he.status = 1 ) AS up_value,' .
-            ' ( SELECT SUM(he.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he WHERE he.time > %s AND he.monitor_id = mo.monitor_id AND ( he.status = 0 OR he.status = 1 )  ) AS total_value ' .
-            ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            ' ( SELECT SUM(he.duration) FROM ' . $table_monitor_heartbeat . ' he WHERE he.time > %s AND he.monitor_id = mo.monitor_id AND he.status = 1 ) AS up_value,' .
+            ' ( SELECT SUM(he.duration) FROM ' . $table_monitor_heartbeat . ' he WHERE he.time > %s AND he.monitor_id = mo.monitor_id AND ( he.status = 0 OR he.status = 1 )  ) AS total_value ' .
+            ' FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d AND mo.issub = 0 LIMIT 1',
             $start_date,
@@ -1076,16 +1208,19 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_last_site_uptime_ratios_stats( $siteid ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+
         $sql = $this->wpdb->prepare(
             'SELECT ' .
-            ' ( SELECT SUM(he24.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id AND he24.status = 1 ) AS up24,' .
-            ' ( SELECT SUM(he24.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id  AND ( he24.status = 0 OR he24.status = 1 )  ) AS total24,' .
-            ' ( SELECT SUM(he7.duration)  FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND he7.status = 1 ) AS up7,' .
-            ' ( SELECT SUM(he7.duration)  FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND ( he7.status = 0 OR he7.status = 1 ) ) AS total7,' .
-            ' ( SELECT SUM(he30.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND he30.status = 1 ) AS up30, ' .
-            ' ( SELECT SUM(he30.duration) FROM ' . $this->table_name( 'monitor_heartbeat' ) . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND ( he30.status = 0 OR he30.status = 1 ) ) AS total30 ' .
-            ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            ' ( SELECT SUM(he24.duration) FROM ' . $table_monitor_heartbeat . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id AND he24.status = 1 ) AS up24,' .
+            ' ( SELECT SUM(he24.duration) FROM ' . $table_monitor_heartbeat . ' he24 WHERE ( he24.time >= NOW() - INTERVAL 1 DAY ) AND he24.monitor_id = he.monitor_id  AND ( he24.status = 0 OR he24.status = 1 )  ) AS total24,' .
+            ' ( SELECT SUM(he7.duration)  FROM ' . $table_monitor_heartbeat . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND he7.status = 1 ) AS up7,' .
+            ' ( SELECT SUM(he7.duration)  FROM ' . $table_monitor_heartbeat . ' he7 WHERE ( he7.time >= NOW() - INTERVAL 7 DAY ) AND he7.monitor_id = he.monitor_id AND ( he7.status = 0 OR he7.status = 1 ) ) AS total7,' .
+            ' ( SELECT SUM(he30.duration) FROM ' . $table_monitor_heartbeat . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND he30.status = 1 ) AS up30, ' .
+            ' ( SELECT SUM(he30.duration) FROM ' . $table_monitor_heartbeat . ' he30 WHERE ( he30.time >= NOW() - INTERVAL 30 DAY ) AND he30.monitor_id = he.monitor_id AND ( he30.status = 0 OR he30.status = 1 ) ) AS total30 ' .
+            ' FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
             ' WHERE mo.wpid = %d LIMIT 1',
             $siteid
@@ -1131,7 +1266,7 @@ KEY idx_wpid (wpid)";
         }
 
         $period_date['uptimeratios'] = array(
-            'start' => $params['start'] . ' 00:00:01',
+            'start' => $params['start'] . ' 00:00:00',
             'end'   => $params['end'] . ' 23:59:59',
         );
 
@@ -1154,11 +1289,11 @@ KEY idx_wpid (wpid)";
             ' FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
             ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
-            ' WHERE mo.wpid = %d LIMIT 1',
+            ' WHERE mo.wpid = %d AND mo.issub = 0 LIMIT 1',
             $siteid
         );
 
-        $result = $this->wpdb->get_row( $sql, ARRAY_A );
+        $result = $this->wpdb->get_row( $sql, ARRAY_A ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
 
         if ( ! is_array( $result ) ) {
             $result = array();
@@ -1186,6 +1321,8 @@ KEY idx_wpid (wpid)";
      * @return array Database query results or empty.
      */
     public function get_db_site_response_time_stats_data( $siteid, $params = array() ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         if ( empty( $params['start'] ) || empty( $params['end'] ) ) {
             return array();
@@ -1196,7 +1333,6 @@ KEY idx_wpid (wpid)";
         $start_ts = strtotime( $params['start'] );
         $end_ts   = strtotime( $params['end'] );
 
-        // Ensure that the date is in the correct format.
         $start = gmdate( 'Y-m-d 00:00:00', $start_ts );
         $end   = gmdate( 'Y-m-d 23:59:59', $end_ts );
 
@@ -1206,43 +1342,47 @@ KEY idx_wpid (wpid)";
             $group_by = ' GROUP BY HOUR(he.time) ';
         } elseif ( 'get_all' === $group_time ) {
             $group_by  = '';
-            $sum_total = ', he.ping_ms as resp_total_ms '; // required.
+            $sum_total = ', he.ping_ms as resp_total_ms ';
         } else {
             $group_by = ' GROUP BY DATE( he.time ) ';
         }
 
         $where = '';
         if ( isset( $params['issub'] ) && 0 === (int) $params['issub'] ) {
-            $where = ' AND mo.issub = 0 '; // primary.
+            $where = ' AND mo.issub = 0 ';
         }
 
         $sql = $this->wpdb->prepare(
-            'SELECT he.time as resp_time ' . $sum_total . '  FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            'SELECT he.time as resp_time ' . $sum_total . '  FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
-            ' WHERE mo.wpid = %d ' . $where . ' AND he.time > "' . $this->escape( $start ) . '" AND he.time <= "' . $this->escape( $end ) . '" ' .
+            ' WHERE mo.wpid = %d ' . $where . ' AND he.time > %s AND he.time <= %s ' .
             $group_by .
             ' ORDER BY resp_time ASC ',
-            $siteid
+            $siteid,
+            $start,
+            $end
         );
 
-        $data = $this->wpdb->get_results( $sql, ARRAY_A );
+        $data = $this->wpdb->get_results( $sql, ARRAY_A ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
 
         $sql_stats = $this->wpdb->prepare(
-            'SELECT AVG( he.ping_ms ) AS avg_time_ms, MIN( he.ping_ms ) as min_time_ms, MAX( he.ping_ms ) as max_time_ms FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            'SELECT AVG( he.ping_ms ) AS avg_time_ms, MIN( he.ping_ms ) as min_time_ms, MAX( he.ping_ms ) as max_time_ms FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
-            ' WHERE mo.wpid = %d AND he.time > "' . $this->escape( $start ) . '" AND he.time <= "' . $this->escape( $end ) . '"',
-            $siteid
+            ' WHERE mo.wpid = %d AND he.time > %s AND he.time <= %s',
+            $siteid,
+            $start,
+            $end
         );
 
         $resp_data = $this->wpdb->get_row( $sql_stats, ARRAY_A );
 
         return array(
-            'resp_time_list'  => $data, // resp time list.
+            'resp_time_list'  => $data,
             'start'           => $start,
             'end'             => $end,
-            'resp_stats_data' => $resp_data, // resp time stats.
+            'resp_stats_data' => $resp_data,
         );
     }
 
@@ -1256,17 +1396,21 @@ KEY idx_wpid (wpid)";
      * @return object|null Database query results or null on failure.
      */
     public function get_site_monitoring_events_stats( $siteid, $params = array() ) {
+        $table_monitors          = esc_sql( $this->table_name( 'monitors' ) );
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
 
         $start = isset( $params['start'] ) ? $params['start'] . ' 00:00:00' : gmdate( 'Y-m-d 00:00:00', time() - 7 * DAY_IN_SECONDS );
         $end   = isset( $params['end'] ) ? $params['end'] . ' 23:59:59' : gmdate( 'Y-m-d 23:59:59', time() );
 
         $sql = $this->wpdb->prepare(
-            'SELECT mo.active,mo.type,mo.keyword,mo.suburl,mo.interval,he.msg,he.status,he.time,he.ping_ms,he.http_code FROM ' . $this->table_name( 'monitors' ) . ' mo ' .
-            ' LEFT JOIN ' . $this->table_name( 'monitor_heartbeat' ) . ' he ' .
+            'SELECT mo.active,mo.type,mo.keyword,mo.suburl,mo.interval,he.msg,he.status,he.time,he.ping_ms,he.http_code FROM ' . $table_monitors . ' mo ' .
+            ' LEFT JOIN ' . $table_monitor_heartbeat . ' he ' .
             ' ON mo.monitor_id = he.monitor_id ' .
-            ' WHERE mo.wpid = %d AND he.time > "' . $this->escape( $start ) . '" AND he.time <= "' . $this->escape( $end ) . '" ' .
+            ' WHERE mo.wpid = %d AND he.time > %s AND he.time <= %s ' .
             ' AND he.importance = 1 ',
-            $siteid
+            $siteid,
+            $start,
+            $end
         );
 
         return $this->wpdb->get_results( $sql, ARRAY_A );
@@ -1283,18 +1427,30 @@ KEY idx_wpid (wpid)";
      * @return mixed
      */
     public function get_uptime_monitor_stat_hourly_by( $monitor_id, $by, $value = false, $obj = ARRAY_A ) {
+        $table_monitor_stat_hourly = esc_sql( $this->table_name( 'monitor_stat_hourly' ) );
+
         if ( 'timestamp' === $by ) {
             if ( empty( $value ) ) {
                 return false;
             }
-            $sql = $this->wpdb->prepare( 'SELECT stho.* FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' stho WHERE stho.monitor_id = %d AND stho.timestamp = %d', $monitor_id, $value );
+            $sql = $this->wpdb->prepare( 'SELECT stho.* FROM ' . $table_monitor_stat_hourly . ' stho WHERE stho.monitor_id = %d AND stho.timestamp = %d', $monitor_id, $value );
             return $this->wpdb->get_row( $sql, $obj );
         } elseif ( 'last24' === $by ) {
             if ( empty( $value ) ) {
                 return false;
             }
-            $sql = $this->wpdb->prepare( 'SELECT stho.* FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' stho WHERE stho.monitor_id = %d AND stho.timestamp >= %d  ORDER BY stho.timestamp ASC ', $monitor_id, $value );
+            $sql = $this->wpdb->prepare( 'SELECT stho.* FROM ' . $table_monitor_stat_hourly . ' stho WHERE stho.monitor_id = %d AND stho.timestamp >= %d  ORDER BY stho.timestamp ASC ', $monitor_id, $value );
             return $this->wpdb->get_results( $sql, $obj );
+        } elseif ( 'between' === $by ) {
+            if ( empty( $value ) ) {
+                return false;
+            }
+            $day   = gmdate( 'Y-m-d', $value );
+            $start = strtotime( $day . ' 00:00:00' );
+            $end   = strtotime( $day . ' 23:59:59' );
+
+            $sql = $this->wpdb->prepare( 'SELECT stho.* FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' stho WHERE stho.monitor_id = %d AND stho.timestamp BETWEEN %d AND %d ORDER BY stho.timestamp ASC ', $monitor_id, $start, $end );
+            return $this->wpdb->get_results( $sql, $obj ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
         }
         return false;
     }
@@ -1307,8 +1463,9 @@ KEY idx_wpid (wpid)";
      * @return void
      */
     public function remove_outdated_hourly_uptime_stats( $days = 30 ) {
-        $time = time() - $days * DAY_IN_SECONDS;
-        $this->wpdb->query( $this->wpdb->prepare( 'DELETE  FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' WHERE timestamp < %d', $time ) );
+        $table_monitor_stat_hourly = esc_sql( $this->table_name( 'monitor_stat_hourly' ) );
+        $time                      = time() - $days * DAY_IN_SECONDS;
+        $this->wpdb->query( $this->wpdb->prepare( 'DELETE  FROM ' . $table_monitor_stat_hourly . ' WHERE timestamp < %d', $time ) );
     }
 
 
@@ -1352,10 +1509,195 @@ KEY idx_wpid (wpid)";
             return false;
         }
 
-        if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $this->table_name( 'monitor_stat_hourly' ) . ' WHERE monitor_id=%d', $monitorid ) ) ) {
+        $table_monitor_stat_hourly = esc_sql( $this->table_name( 'monitor_stat_hourly' ) );
+        if ( $this->wpdb->query( $this->wpdb->prepare( 'DELETE FROM ' . $table_monitor_stat_hourly . ' WHERE monitor_id=%d', $monitorid ) ) ) {
             return true;
         }
 
         return false;
+    }
+
+    /**
+     * Count the number of transitions (up -> down or down -> up) for a monitor_id in the time period.
+     *
+     * @param int    $monitor_id ID of the monitor.
+     * @param string $start_at Start date (Y-m-d H:i:s).
+     * @param string $end_at End date (Y-m-d H:i:s).
+     * @param string $transition Transition type: 'up_to_down' or 'down_to_up'.
+     *
+     * @return int Number of transitions.
+     */
+    public function count_site_incidents_stats( $monitor_id, $start_at, $end_at, $transition = 'up_to_down' ) {
+        $start      = ! empty( $start_at ) ? $start_at . ' 00:00:00' : gmdate( 'Y-m-d 00:00:00', time() - 7 * DAY_IN_SECONDS );
+        $end        = ! empty( $end_at ) ? $end_at . ' 23:59:59' : gmdate( 'Y-m-d 23:59:59', time() );
+        $table_name = $this->table_name( 'monitor_heartbeat' );
+
+        // Define conditions by transition type.
+        if ( 'up_to_down' === $transition ) {
+            $current_status = MainWP_Uptime_Monitoring_Connect::DOWN;
+            $prev_status    = MainWP_Uptime_Monitoring_Connect::UP;
+        } elseif ( 'down_to_up' === $transition ) {
+            $current_status = MainWP_Uptime_Monitoring_Connect::UP;
+            $prev_status    = MainWP_Uptime_Monitoring_Connect::DOWN;
+        } else {
+            return 0; // Return 0 if transition type is invalid.
+        }
+
+        $sql = "SELECT COUNT(*) AS transition_count
+            FROM {$table_name} h
+            LEFT JOIN {$table_name} p
+            ON p.monitor_id = h.monitor_id
+            AND p.time = (
+                SELECT MAX(time)
+                FROM {$table_name}
+                WHERE monitor_id = h.monitor_id
+                    AND time < h.time
+            )
+            WHERE h.monitor_id = %d
+            AND h.time BETWEEN %s AND %s
+            AND h.status = %d
+            AND p.status = %d";
+
+        $query = $this->wpdb->prepare( $sql, $monitor_id, $start, $end, $current_status, $prev_status );
+        return (int) $this->wpdb->get_var( $query ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
+    }
+
+    /**
+     * Get uptime monitoring stats.
+     *
+     * @param int    $monitor_id Monitor ID.
+     * @param string $start_at Start date (Y-m-d).
+     * @param string $end_at End date (Y-m-d).
+     *
+     * @return array Database query results or empty.
+     */
+    public function get_uptime_monitoring_stats( $monitor_id, $start_at, $end_at ) {
+        $start      = ! empty( $start_at ) ? $start_at . ' 00:00:00' : gmdate( 'Y-m-d 00:00:00', time() - 7 * DAY_IN_SECONDS );
+        $end        = ! empty( $end_at ) ? $end_at . ' 23:59:59' : gmdate( 'Y-m-d 23:59:59', time() );
+        $table_name = $this->table_name( 'monitor_heartbeat' );
+
+        $sql = "SELECT  * FROM {$table_name} h
+            WHERE h.monitor_id = %d
+            AND h.time BETWEEN %s AND %s
+            ORDER BY h.time ASC";
+
+        $query = $this->wpdb->prepare( $sql, $monitor_id, $start, $end );
+        return $this->wpdb->get_results( $query, ARRAY_A ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
+    }
+
+    /**
+     * Get heartbeat count.
+     *
+     * @param int    $monitor_id Monitor ID.
+     * @param array  $date_range Date range.
+     * @param string $status Status.
+     *
+     * @return int Heartbeat count.
+     */
+    public function get_heartbeat_count( $monitor_id, $date_range, $status = '' ) {
+
+        $table_name = $this->table_name( 'monitor_heartbeat' );
+
+        $where_conditions   = array();
+        $where_conditions[] = $this->wpdb->prepare( 'monitor_id = %d', $monitor_id );
+        $where_conditions[] = $this->wpdb->prepare( 'time >= %s', $date_range['start'] );
+        $where_conditions[] = $this->wpdb->prepare( 'time <= %s', $date_range['end'] );
+
+        if ( is_numeric( $status ) ) {
+            $where_conditions[] = $this->wpdb->prepare( 'status = %d', $status );
+        }
+
+        $where_clause = 'WHERE ' . implode( ' AND ', $where_conditions );
+
+        $sql = "SELECT COUNT(*) FROM {$table_name} {$where_clause}";
+
+        return (int) $this->wpdb->get_var( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
+    }
+
+
+    /**
+     * Get heartbeat data paginated.
+     *
+     * @param int    $monitor_id Monitor ID.
+     * @param array  $date_range Date range.
+     * @param string $status Status.
+     * @param int    $per_page Number of items per page.
+     * @param int    $offset Offset.
+     *
+     * @return array Heartbeat data.
+     */
+    public function get_heartbeat_data_paginated( $monitor_id, $date_range, $status = '', $per_page = 50, $offset = 0 ) {
+        $table_name = $this->table_name( 'monitor_heartbeat' );
+
+        $where_conditions   = array();
+        $where_conditions[] = $this->wpdb->prepare( 'monitor_id = %d', $monitor_id );
+        $where_conditions[] = $this->wpdb->prepare( 'time >= %s', $date_range['start'] );
+        $where_conditions[] = $this->wpdb->prepare( 'time <= %s', $date_range['end'] );
+
+        if ( is_numeric( $status ) ) {
+            $where_conditions[] = $this->wpdb->prepare( 'status = %d', $status );
+        }
+
+        $where_clause = 'WHERE ' . implode( ' AND ', $where_conditions );
+        // Limit item.
+        $limit_clause = '';
+        if ( $per_page > 0 ) {
+            $limit_clause = $this->wpdb->prepare( 'LIMIT %d OFFSET %d', $per_page, $offset );
+        }
+
+        $sql = "SELECT * FROM {$table_name} {$where_clause} ORDER BY time DESC {$limit_clause}";
+
+        return $this->wpdb->get_results( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
+    }
+
+    /**
+     * Get heartbeat data for incidents processing.
+     *
+     * @param int $monitor_id Monitor ID.
+     * @return array Heartbeat data ordered by time.
+     */
+    public function get_heartbeat_data_for_incidents( $monitor_id ) {
+        $table_name = $this->table_name( 'monitor_heartbeat' );
+
+        $sql = $this->wpdb->prepare(
+            'SELECT status, time FROM ' . $table_name . ' WHERE monitor_id = %d ORDER BY time ASC',
+            $monitor_id
+        );
+
+        return $this->wpdb->get_results( $sql ); //phpcs:ignore PluginCheck.Security.DirectDB.UnescapedDBParameter -- SQL from wpdb->prepare().
+    }
+
+    /**
+     * Cleanup monitoring data.
+     *
+     * @param int $days Days to keep monitoring data.
+     *
+     * @return int Deleted results.
+     */
+    public function cleanup_heartbeat_data( $days ) {
+        $table_monitor_heartbeat = esc_sql( $this->table_name( 'monitor_heartbeat' ) );
+        $time                    = time() - $days * DAY_IN_SECONDS;
+        $datetime                = gmdate( 'Y-m-d H:i:s', $time );
+
+        $max_batches = 10; // max 10k rows per run.
+        $batches     = 0;
+
+        do {
+            $rows = $this->wpdb->query(
+                $this->wpdb->prepare(
+                    "DELETE FROM {$table_monitor_heartbeat}
+                    WHERE `time` < %s
+                    ORDER BY `time`
+                    LIMIT %d",
+                    $datetime,
+                    1000
+                )
+            );
+            ++$batches;
+        } while ( 1000 === $rows && $batches < $max_batches );
+
+        if ( 1000 === $rows && $batches >= $max_batches ) {
+            MainWP_Utility::update_option( 'mainwp_uptime_monitor_cleanup_heartbeat_at', 0 ); // reset cleanup heartbeat to process on next run.
+        }
     }
 }

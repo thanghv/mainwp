@@ -7,6 +7,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 /**
  * Class MainWP_Manage_Sites_Backup_View
  *
@@ -86,7 +91,7 @@ class MainWP_Manage_Sites_Backup_View { // phpcs:ignore Generic.Classes.OpeningB
         <div id="ajax-information-zone" class="updated" style="display: none;"></div>
 
         <?php if ( empty( $primaryBackupMethods ) ) { ?>
-            <div class="ui blue message"><?php printf( esc_html__( 'Did you know that MainWP has Extensions for working with popular backup plugins? Visit the %1$sExtensions Site%2$s for options.', 'mainwp' ), '<a href="https://mainwp.com/extensions/extension-category/backups/" target="_blank" ?>', '</a> <i class="external alternate icon"></i>' ); // NOSONAR - noopener - open safe. ?></div>
+            <div class="ui blue message"><?php printf( /* translators: 1: Opening anchor tag, 2: Closing anchor tag with icon. */ esc_html__( 'Did you know that MainWP has Extensions for working with popular backup plugins? Visit the %1$sExtensions Site%2$s for options.', 'mainwp' ), '<a href="https://mainwp.com/extensions/extension-category/backups/" target="_blank" ?>', '</a> <i class="external alternate icon"></i>' ); // NOSONAR - noopener - open safe. ?></div>
             <?php
         }
         ?>
@@ -152,7 +157,7 @@ class MainWP_Manage_Sites_Backup_View { // phpcs:ignore Generic.Classes.OpeningB
         ?>
             <h3 class="ui dividing header"><?php esc_html_e( 'Backup Options', 'mainwp' ); ?></h3>
             <form method="POST" action="" class="ui form">
-                <?php wp_nonce_field( 'mainwp-admin-nonce' ); ?>
+                <?php MainWP_UI::generate_wp_nonce( 'mainwp-admin-nonce' ); ?>
                 <input type="hidden" name="site_id" id="backup_site_id" value="<?php echo intval( $website->id ); ?>"/>
                 <input type="hidden" name="backup_site_full_size" id="backup_site_full_size" value="<?php echo esc_attr( $website->totalsize ); ?>"/>
                 <input type="hidden" name="backup_site_db_size" id="backup_site_db_size" value="<?php echo esc_attr( $website->dbsize ); ?>"/>

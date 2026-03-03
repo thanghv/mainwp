@@ -79,7 +79,7 @@ class Connector_Installer extends Log_Connector {
      *
      * @action mainwp_install_update_actions.
      *
-     * @param array  $website  website.
+     * @param object $website  website.
      * @param string $pAction install action.
      * @param array  $data data result.
      * @param string $type action type.
@@ -145,11 +145,7 @@ class Connector_Installer extends Log_Connector {
                 return false;
             }
 
-            $message = esc_html_x(
-                '%1$s',
-                'Plugin/theme installation. 1: Plugins/themes namess, 2: vesion',
-                'mainwp'
-            );
+            $message = '%1$s';
 
         } elseif ( 'updated' === $action && ( in_array( $type, array( 'plugin', 'theme', 'trans' ) ) ) ) {
 
@@ -184,16 +180,12 @@ class Connector_Installer extends Log_Connector {
             }
 
             if ( 'plugin' === $type || 'theme' === $type || 'trans' === $type ) {
-                $message = esc_html_x(
-                    '%1$s',
-                    'Update. 1: name',
-                    'mainwp'
-                );
+                $message = '%1$s';
             } else {
                 return;
             }
         } elseif ( 'updated' === $action && 'core' === $type ) {
-            $message     = esc_html__( '%1$s', 'mainwp' );
+            $message     = '%1$s';
             $args        = array(
                 'name'        => 'WordPress', // label.
                 'version'     => isset( $data['version'] ) ? $data['version'] : '',
@@ -240,7 +232,7 @@ class Connector_Installer extends Log_Connector {
      * @param array  $params params array.
      * @param array  $action_data response data.
      */
-    public function callback_mainwp_install_plugin_action( $website, $plugin_act, $params, $action_data ) {
+    public function callback_mainwp_install_plugin_action( $website, $plugin_act, $params, $action_data ) { // phpcs:ignore -- NOSONAR - complex method.
 
         if ( empty( $website ) || ! is_object( $website ) || empty( $website->id ) || empty( $plugin_act ) || ! is_string( $plugin_act ) || ! is_array( $params ) ) {
             return;
@@ -259,11 +251,15 @@ class Connector_Installer extends Log_Connector {
         foreach ( $action_data as $item ) {
             $item = $this->sanitize_data( $item );
             if ( ! empty( $item ) && isset( $item['name'] ) ) {
-                $logs_args[] = array(
+                $log_arg = array(
                     'name'    => $item['name'],
                     'version' => $item['version'],
                     'slug'    => $item['slug'],
                 );
+                if ( ! empty( $item['created'] ) ) {
+                    $log_arg['created'] = $item['created'];
+                }
+                $logs_args[] = $log_arg;
             }
         }
 
@@ -274,17 +270,12 @@ class Connector_Installer extends Log_Connector {
         $action  = $plugin_act;
         $context = 'plugin';
 
-        $message = esc_html_x(
-            '%1$s',
-            '1: Plugin name, 2: plugin version',
-            'mainwp'
-        );
+        $message = '%1$s';
 
         $state = 1;
 
-        $count_bulk = count( $logs_args );
         foreach ( $logs_args as $args ) {
-            $args['duration_bulk'] = $count_bulk;
+            $args['duration_bulk'] = is_array( $params ) && ! empty( $params['duration_bulk'] ) ? $params['duration_bulk'] : count( $logs_args );
             $this->log(
                 $message,
                 $args,
@@ -340,11 +331,7 @@ class Connector_Installer extends Log_Connector {
         $action  = $theme_act;
         $context = 'theme';
 
-        $message = esc_html_x(
-            '%1$s',
-            '1: Theme name, 2: Theme version',
-            'mainwp'
-        );
+        $message = '%1$s';
 
         $state = 1;
 

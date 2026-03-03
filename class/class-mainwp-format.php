@@ -7,6 +7,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 /**
  * Class MainWP_Format
  *
@@ -230,8 +235,8 @@ class MainWP_Format { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
                                         ( ( ! empty( $title ) ) ? $title . "\r\n\r\n" : '' ) .
                                         $body . "\r\n\r\n";
                 $mail_send['footer'] = 'MainWP: https://mainwp.com' . "\r\n" .
-                                        'Extensions: https://mainwp.com/mainwp-extensions/' . "\r\n" .
-                                        'Documentation: https://mainwp.com/kb/' . "\r\n" .
+                                        'Add-ons: https://mainwp.com/mainwp-add-ons/' . "\r\n" .
+                                        'Documentation: https://docs.mainwp.com/' . "\r\n" .
                                         'Blog: https://mainwp.com/mainwp-blog/' . "\r\n" .
                                         'Codex: https://mainwp.dev/' . "\r\n" .
                                         'Support: https://mainwp.com/support/' . "\r\n\r\n" .
@@ -239,6 +244,7 @@ class MainWP_Format { // phpcs:ignore Generic.Classes.OpeningBraceSameLine.Conte
                                         'Friend us on Facebook: https://www.facebook.com/mainwp' . "\r\n\r\n" .
                                         "Copyright {$current_year} MainWP, All rights reserved.";
         } else {
+            // phpcs:disable PluginCheck.CodeAnalysis.Heredoc.NotAllowed -- Email HTML templates; refactoring 250+ lines of HTML to string concatenation carries high regression risk with no security benefit as content is not browser-rendered.
             $mail_send['header'] = <<<EOT
             <!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.0 Transitional//EN" "http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd">
 <html>
@@ -543,7 +549,7 @@ EOT;
                                                                         }
                                                                     </style>
                                                                     <div class="tpl-content-highlight" id="mainwp-links" style="color: #b8b8b8;font-family: Arial;font-size: 12px;line-height: 125%;text-align: center;">
-                                                                    <a href="https://mainwp.com" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">MainWP</a> | <a href="https://mainwp.com/mainwp-extensions/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Extensions</a> | <a href="https://mainwp.com/kb/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration:none;text-transform: uppercase;">Documentation</a> | <a href="https://mainwp.com/mainwp-blog/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Blog</a> | <a href="http://codex.mainwp.com" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Codex</a> | <a href="https://mainwp.com/support/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Support</a></div>
+                                                                    <a href="https://mainwp.com" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">MainWP</a> | <a href="https://mainwp.com/mainwp-add-ons/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Extensions</a> | <a href="https://docs.mainwp.com/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration:none;text-transform: uppercase;">Documentation</a> | <a href="https://mainwp.com/mainwp-blog/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Blog</a> | <a href="http://codex.mainwp.com" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Codex</a> | <a href="https://mainwp.com/support/" target="_self" style="color: #7fb100;font-weight: normal;text-decoration: none;text-transform: uppercase;">Support</a></div>
 
                                                                     <hr><br>
                                                                     <a href="https://x.com/mymainwp" target="_blank" style="color: #336699;font-weight: normal;text-decoration: underline;">Follow us on X</a> | <a href="https://www.facebook.com/mainwp" style="color:#336699;font-weight: normal;text-decoration: underline;">Friend us on Facebook</a>
@@ -575,6 +581,7 @@ EOT;
     </body>
 </html>
 EOT;
+            // phpcs:enable PluginCheck.CodeAnalysis.Heredoc.NotAllowed
         }
         $mail_send = apply_filters( 'mainwp_format_email', $mail_send );
         return $mail_send['header'] . $mail_send['body'] . $mail_send['footer'];

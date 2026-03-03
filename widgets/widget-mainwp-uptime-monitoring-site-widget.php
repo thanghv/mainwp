@@ -8,6 +8,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 /**
  * Class MainWP_Uptime_Monitoring_Site_Widget
  *
@@ -198,10 +203,10 @@ class MainWP_Uptime_Monitoring_Site_Widget {
                     <input type="hidden" value="<?php echo esc_attr( $current_period ); ?>">
                     <i class="vertical ellipsis icon"></i>
                     <div class="menu">
-                        <a class="item" data-value="day" title="<?php esc_html_e( 'Last 24 hours', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 24 hours' ); ?></a>
-                        <a class="item" data-value="week" title="<?php esc_html_e( 'Last 7 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 7 days' ); ?></a>
-                        <a class="item" data-value="month" title="<?php esc_html_e( 'Last 30 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 30 days' ); ?></a>
-                        <a class="item" data-value="year" title="<?php esc_html_e( 'Last 365 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 365 days' ); ?></a>
+                        <a class="item" data-value="day" title="<?php esc_html_e( 'Last 24 hours', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 24 hours', 'mainwp' ); ?></a>
+                        <a class="item" data-value="week" title="<?php esc_html_e( 'Last 7 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 7 days', 'mainwp' ); ?></a>
+                        <a class="item" data-value="month" title="<?php esc_html_e( 'Last 30 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 30 days', 'mainwp' ); ?></a>
+                        <a class="item" data-value="year" title="<?php esc_html_e( 'Last 365 days', 'mainwp' ); ?>" ><?php esc_html_e( 'Last 365 days', 'mainwp' ); ?></a>
                     </div>
                 </div>
             </div>
@@ -214,7 +219,6 @@ class MainWP_Uptime_Monitoring_Site_Widget {
 
                 jQuery( '#uptime-monitoring-widget-response-times-top-select' ).dropdown( {
                     onChange: function( value ) {
-                        console.log( value );
                         mainwp_uptime_monitoring_response_time_filter(value);
                     }
                 });
@@ -246,8 +250,8 @@ class MainWP_Uptime_Monitoring_Site_Widget {
 
         <div class="mainwp-scrolly-overflow">
             <div id="mainwp-monitor-widget-loader">
-                <div class="ui active inverted dimmer">
-                    <div class="ui text loader"><?php esc_html_e( 'Loading', 'mainwp' ); ?></div>
+                <div class="ui active dimmer">
+                    <div class="ui double loader"><?php esc_html_e( 'Loading', 'mainwp' ); ?></div>
                 </div>
                 <p></p>
             </div>
@@ -454,7 +458,6 @@ class MainWP_Uptime_Monitoring_Site_Widget {
                     const values = data.map(item => item.value);
                     let x_counter = -1;
                     let x_div = Math.ceil(categories.length / 12);
-                    console.log(categories ? categories.length : 0);
                     if( !up_monitoring){
                             // Chart configuration.
                             const options = {

@@ -7,6 +7,11 @@
 
 namespace MainWP\Dashboard;
 
+// Exit if accessed directly.
+if ( ! defined( 'ABSPATH' ) ) {
+    exit;
+}
+
 // Include class-wp-list-table.php.
 if ( ! class_exists( '\WP_List_Table' ) ) {
     require_once ABSPATH . 'wp-admin/includes/class-wp-list-table.php'; // NOSONAR - WP compatible.
@@ -88,11 +93,11 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
         if ( 'search' === $tab ) {
             $tabs['search'] = esc_html__( 'Search Results', 'mainwp' );
         }
-        $tabs['featured']    = _x( 'Featured', 'Plugin Installer' );
-        $tabs['popular']     = _x( 'Popular', 'Plugin Installer' );
-        $tabs['recommended'] = _x( 'Recommended', 'Plugin Installer' );
+        $tabs['featured']    = _x( 'Featured', 'Plugin Installer', 'mainwp' );
+        $tabs['popular']     = _x( 'Popular', 'Plugin Installer', 'mainwp' );
+        $tabs['recommended'] = _x( 'Recommended', 'Plugin Installer', 'mainwp' );
         if ( 'beta' === $tab || false !== strpos( $GLOBALS['wp_version'], '-' ) ) {
-            $tabs['beta'] = _x( 'Beta Testing', 'Plugin Installer' );
+            $tabs['beta'] = _x( 'Beta Testing', 'Plugin Installer', 'mainwp' );
         }
         if ( current_user_can( 'upload_plugins' ) ) {
             // No longer a real tab. Here for filter compatibility.
@@ -203,12 +208,9 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
      * Check for errors.
      */
     public function no_items() {
-        if ( isset( $this->error ) ) {
-            $message = $this->error->get_error_message() . '<p class="hide-if-no-js"><a href="#" class="button" onclick="document.location.reload(); return false;">' . esc_html__( 'Try again', 'mainwp' ) . '</a></p>';
-        } else {
-            $message = esc_html__( 'No plugins match your request.', 'mainwp' );
-        }
-        echo '<div class="ui message yellow">' . $message . '</div>'; // phpcs:ignore WordPress.Security.EscapeOutput
+        echo '<div class="ui center aligned segment">';
+        MainWP_UI::render_empty_page_placeholder( __( 'No plugins found.', 'mainwp' ), __( 'Please try a different search.', 'mainwp' ), '<em data-emoji=":mag:" class="big"></em>' );
+        echo '</div>';
     }
 
     /**
@@ -217,18 +219,41 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
      * Override the parent display() so we can provide a different container.
      */
     public function display() {
+        $search = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : '';
         ?>
-        <div id="mainwp-install-plugins-container" class="ui three mainwp-cards cards">
-                <?php $this->display_rows_or_placeholder(); ?>
+        <div class="ui two column stackable grid">
+            <div class="column left aligned middle aligned">
+                <?php if ( ! empty( $search ) ) : ?>
+                <h3 class="ui header"><?php
+                /* translators: %s: Search term. */
+                echo esc_html( sprintf( __( 'Search results for: %s', 'mainwp' ), $search ) ); ?></h3>
+                <?php endif; ?>
             </div>
-            <div class="ui hidden divider"></div>
-            <div class="ui column grid">
-                <div class="column right aligned">
-                    <div class="inline field">
-                        <?php $this->display_tablenav( 'bottom' ); ?>
-                    </div>
+            <div class="column right aligned middle aligned">
+                <div class="inline field">
+                    <?php $this->display_tablenav( 'top' ); ?>
                 </div>
             </div>
+        </div>
+        <div class="ui hidden divider"></div>
+        <div id="mainwp-install-plugins-container" class="ui three mainwp-cards cards">
+            <?php $this->display_rows_or_placeholder(); ?>
+        </div>
+        <div class="ui hidden divider"></div>
+        <div class="ui two column stackable grid">
+            <div class="column left aligned middle aligned">
+                <?php if ( ! empty( $search ) ) : ?>
+                    <?php
+                    /* translators: %s: Search term. */
+                    echo esc_html( sprintf( __( 'Search results for: %s', 'mainwp' ), $search ) ); ?>
+                <?php endif; ?>
+            </div>
+            <div class="column right aligned middle aligned">
+                <div class="inline field">
+                    <?php $this->display_tablenav( 'bottom' ); ?>
+                </div>
+            </div>
+        </div>
         <?php
     }
 
@@ -272,7 +297,8 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
         $total_items = $this->_pagination_args['total_items'];
         $total_pages = (int) $this->_pagination_args['total_pages'];
 
-        $perpage_paging = '<span>' . sprintf( _n( '%s item', '%s items', $total_items ), number_format_i18n( $total_items ) ) . '</span>';
+        /* translators: %s: Number of items. */
+        $perpage_paging = '<span>' . sprintf( _n( '%s item', '%s items', $total_items, 'mainwp' ), number_format_i18n( $total_items ) ) . '</span>';
 
         $current              = (int) $this->get_pagenum();
         $removable_query_args = wp_removable_query_args();
@@ -283,10 +309,10 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
 
         $page_links = array();
 
-        $disable_first        = false;
-                $disable_last = false;
-                $disable_prev = false;
-                $disable_next = false;
+        $disable_first = false;
+        $disable_last  = false;
+        $disable_prev  = false;
+        $disable_next  = false;
 
         if ( 1 === $current ) {
             $disable_first = true;
@@ -306,13 +332,13 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
         if ( $disable_first ) {
             $page_links[] = '<a class="item disabled" aria-hidden="true"><i class="angle double left icon"></i></a>';
         } else {
-            $page_links[] = sprintf( "<a class='item' href='%s' title='" . esc_html__( 'First page' ) . "' aria-hidden='true'>%s</a>", esc_url( remove_query_arg( 'paged', $current_url ) ), '<i class="angle double left icon"></i>' );
+            $page_links[] = sprintf( "<a class='item' href='%s' title='" . esc_html__( 'First page', 'mainwp' ) . "' aria-hidden='true'>%s</a>", esc_url( remove_query_arg( 'paged', $current_url ) ), '<i class="angle double left icon"></i>' );
         }
 
         if ( $disable_prev ) {
             $page_links[] = '<a class="item disabled" aria-hidden="true"><i class="angle left icon"></i></a>';
         } else {
-            $page_links[] = sprintf( "<a class='item' href='%s' title='" . esc_html__( 'Previous page' ) . "' aria-hidden='true'>%s</a>", esc_url( add_query_arg( 'paged', max( 1, $current - 1 ), $current_url ) ), '<i class="angle left icon"></i>' );
+            $page_links[] = sprintf( "<a class='item' href='%s' title='" . esc_html__( 'Previous page', 'mainwp' ) . "' aria-hidden='true'>%s</a>", esc_url( add_query_arg( 'paged', max( 1, $current - 1 ), $current_url ) ), '<i class="angle left icon"></i>' );
         }
 
         if ( $current - 1 > 0 ) {
@@ -338,7 +364,7 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
         }
 
         if ( $total_pages > 1 ) {
-            $perpage_paging = $perpage_paging . "&nbsp;&nbsp;<div class='ui pagination menu'>" . join( "\n", $page_links ) . '</div>';
+            $perpage_paging = $perpage_paging . "&nbsp;&nbsp;<div class='ui mini pagination menu'>" . join( "\n", $page_links ) . '</div>';
         }
 
         ob_start();
@@ -392,6 +418,71 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
     }
 
     /**
+     * Check if a search term matches mainwp or mainwp child (case-insensitive).
+     *
+     * @param string $term Search term.
+     * @return bool True if matches.
+     */
+    private function is_mainwp_search( $term ) {
+        $normalized = strtolower( trim( $term ) );
+        return (bool) preg_match( '/^mainwp(\s*-?\s*child)?$/i', $normalized );
+    }
+
+    /**
+     * Render hardcoded MainWP Child plugin card.
+     *
+     * @return void
+     */
+    private function render_mainwp_child_card() {
+        $details_link = self_admin_url( 'plugin-install.php?tab=plugin-information&plugin=mainwp-child&name=' . rawurlencode( 'MainWP Child' ) );
+        $icon_url     = MAINWP_PLUGIN_URL . 'assets/images/mainwp-icon.svg';
+        $plugin_name  = esc_attr__( 'MainWP Child &#8211; Securely Connects to the MainWP Dashboard to Manage Multiple Sites', 'mainwp' );
+        ?>
+        <div class="card plugin-card-mainwp-child" plugin-slug="mainwp-child" plugin-name="MainWP Child">
+            <?php do_action( 'mainwp_install_plugin_card_top' ); ?>
+            <div class="content">
+                <a class="right floated mini ui image open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><img src="<?php echo esc_url( $icon_url ); ?>" alt="<?php esc_attr_e( 'MainWP Child', 'mainwp' ); ?>" /></a>
+                <div class="header">
+                    <a class="open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><?php esc_html_e( 'MainWP Child', 'mainwp' ); ?></a>
+                </div>
+                <div class="meta"><cite><?php
+                /* translators: %s: Plugin author name. */
+                printf( esc_html__( 'By %s', 'mainwp' ), '<a href="' . esc_url( 'https://profiles.wordpress.org/mainwp/' ) . '">mainwp</a>' ); // phpcs:ignore WordPress.Security.EscapeOutput ?></cite></div>
+                <div class="description">
+                    <p><?php esc_html_e( 'MainWP Child connects your WordPress sites to this Dashboard.', 'mainwp' ); ?></p>
+                    <p><?php esc_html_e( 'Already managing a site here? Select Install Plugin, choose your sites in the right panel, and click Complete Installation.', 'mainwp' ); ?></p>
+                    <p><?php esc_html_e( 'Setting up a new site? Download the plugin, then:', 'mainwp' ); ?></p>
+                    <div class="ui list">
+                        <div class="item"><p>1. <?php esc_html_e( 'Log in to your WordPress site', 'mainwp' ); ?></p></div>
+                        <div class="item"><p>2. <?php esc_html_e( 'Go to Plugins → Add New → Upload Plugin', 'mainwp' ); ?></p></div>
+                        <div class="item"><p>3. <?php esc_html_e( 'Upload and activate the downloaded file', 'mainwp' ); ?></p></div>
+                        <div class="item"><p>4. <?php esc_html_e( 'Return here to add the site to your Dashboard', 'mainwp' ); ?></p></div>
+                    </div>
+                </div>
+            </div>
+            <div class="extra content">
+                <div class="left aligned middle aligned column">
+                    <a href="<?php echo esc_url( 'https://downloads.wordpress.org/plugin/mainwp-child.latest-stable.zip' ); ?>" class="ui mini green basic fluid button"><i class="download icon"></i><?php esc_html_e( 'Download', 'mainwp' ); ?></a>
+                </div>
+            </div>
+            <div class="extra content">
+                <div class="ui two column grid">
+                    <div class="left aligned middle aligned column">
+                        <a href="<?php echo esc_url( $details_link ); ?>" class="ui mini button open-plugin-details-modal"><?php esc_html_e( 'Plugin Details', 'mainwp' ); ?></a>
+                    </div>
+                    <div class="right aligned middle aligned column">
+                        <div class="ui radio checkbox">
+                            <input name="install-plugin" type="radio" id="install-plugin-mainwp-child" plugin-name="<?php echo esc_attr( $plugin_name ); ?>" plugin-version="">
+                            <label><?php esc_html_e( 'Install Plugin', 'mainwp' ); ?></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <?php
+    }
+
+    /**
      * Method display_rows()
      *
      * Build Plugin Cards.
@@ -399,6 +490,19 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
      * @return mixed Plugin cards.
      */
     public function display_rows() { //phpcs:ignore -- NOSONAR - complex.
+        $search_term = isset( $_GET['s'] ) ? sanitize_text_field( wp_unslash( $_GET['s'] ) ) : ''; // phpcs:ignore WordPress.Security.NonceVerification
+
+        if ( ! empty( $search_term ) && $this->is_mainwp_search( $search_term ) ) {
+            $this->render_mainwp_child_card();
+            $this->items = array_filter(
+                $this->items,
+                function ( $plugin ) {
+                    $slug = is_array( $plugin ) ? ( $plugin['slug'] ?? '' ) : ( $plugin->slug ?? '' );
+                    return 'mainwp-child' !== $slug;
+                }
+            );
+        }
+
         $plugins_allowedtags = array(
             'a'       => array(
                 'href'   => array(),
@@ -419,9 +523,9 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
         );
 
         $plugins_group_titles = array(
-            'Performance' => _x( 'Performance', 'Plugin installer group title' ),
-            'Social'      => _x( 'Social', 'Plugin installer group title' ),
-            'Tools'       => _x( 'Tools', 'Plugin installer group title' ),
+            'Performance' => _x( 'Performance', 'Plugin installer group title', 'mainwp' ),
+            'Social'      => _x( 'Social', 'Plugin installer group title', 'mainwp' ),
+            'Tools'       => _x( 'Tools', 'Plugin installer group title', 'mainwp' ),
         );
 
         $group = null;
@@ -461,7 +565,8 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
 
             $author = wp_kses( $plugin['author'], $plugins_allowedtags );
             if ( ! empty( $author ) ) {
-                $author = ' <cite>' . sprintf( esc_html__( 'By %s', 'mainwp' ), $author ) . '</cite>';
+                /* translators: %s: Plugin author name. */
+            $author = ' <cite>' . sprintf( esc_html__( 'By %s', 'mainwp' ), $author ) . '</cite>';
             }
 
             $details_link = self_admin_url( 'plugin-install.php?tab=plugin-information&plugin=' . $plugin['slug'] . '&url=' . ( isset( $plugin['PluginURI'] ) ? rawurlencode( $plugin['PluginURI'] ) : '' ) . '&name=' . rawurlencode( $plugin['name'] ) );
@@ -480,62 +585,68 @@ class MainWP_Plugins_Install_List_Table extends \WP_List_Table { // phpcs:ignore
             ?>
 
             <div class="card plugin-card-<?php echo sanitize_html_class( $plugin['slug'] ); ?>" plugin-slug="<?php echo esc_attr( $plugin['slug'] ); ?>" plugin-name="<?php echo esc_attr( $plugin['name'] ); ?>">
-            <?php
-            /**
-             * Action: mainwp_install_plugin_card_top
-             *
-             * Fires at the plugin card at top on the Install Plugins page.
-             *
-             * @since 4.1
-             */
-            do_action( 'mainwp_install_plugin_card_top' );
-            ?>
-            <div class="content">
-            <a class="right floated mini ui image open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><img src="<?php echo esc_attr( $plugin_icon_url ); ?>" alt="<?php esc_attr_e( $plugin['name'] ); ?>" /></a>
-            <div class="header">
-                <a class="open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><?php echo $title; // phpcs:ignore WordPress.Security.EscapeOutput ?></a>
-                    </div>
-            <div class="meta">
-                        <?php echo $author; // phpcs:ignore WordPress.Security.EscapeOutput ?>
-                    </div>
-            <div class="description">
-            <?php echo esc_html( wp_strip_all_tags( $description ) ); ?>
-                </div>
-                    </div>
-                <div class="extra content">
-                    <div class="ui stacking grid">
-                        <div class="four wide left aligned column">
-                    <?php
-                    wp_star_rating(
-                        array(
-                            'rating' => $plugin['rating'],
-                            'type'   => 'percent',
-                            'number' => $plugin['num_ratings'],
-                        )
-                    );
-                    ?>
-                    </div>
-                        <div class="twelve wide right aligned column"><span class="ui small text"><?php esc_html_e( 'Updated: ', 'mainwp' ); ?><?php printf( esc_html__( '%s ago', 'mainwp' ), human_time_diff( $last_updated_timestamp ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></span></div>
-                    </div>
-                </div>
-                    <div class="extra content">
-                        <a href="<?php echo esc_attr( $details_link ); ?>" class="ui mini button open-plugin-details-modal"><?php echo esc_html__( 'Plugin Details', 'mainwp' ); ?></a>
-                        <div class="ui radio checkbox right floated">
-                        <input name="install-plugin" type="radio" id="install-plugin-<?php echo sanitize_html_class( $plugin['slug'] ); ?>" plugin-name="<?php echo esc_attr( $title ); ?>" plugin-version="<?php echo esc_attr( $version ); ?>">
-                        <label><?php esc_html_e( 'Install Plugin', 'mainwp' ); ?></label>
-                        </div>
-                    </div>
                 <?php
                 /**
-                 * Action: mainwp_install_plugin_card_bottom
+                 * Action: mainwp_install_plugin_card_top
                  *
-                 * Fires at the plugin card at bottom on the Install Plugins page.
+                 * Fires at the plugin card at top on the Install Plugins page.
                  *
                  * @since 4.1
                  */
-                do_action( 'mainwp_install_plugin_card_bottom', $plugin );
+                do_action( 'mainwp_install_plugin_card_top' );
                 ?>
+                <div class="content">
+                    <a class="right floated mini ui image open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><img src="<?php echo esc_attr( $plugin_icon_url ); ?>" alt="<?php echo esc_attr( $plugin['name'] ); ?>" /></a>
+                    <div class="header">
+                        <a class="open-plugin-details-modal" href="<?php echo esc_url( $details_link ); ?>"><?php echo $title; // phpcs:ignore WordPress.Security.EscapeOutput ?></a>
+                    </div>
+                    <div class="meta"><?php echo $author; // phpcs:ignore WordPress.Security.EscapeOutput ?></div>
+                    <div class="description">
+                        <?php echo esc_html( wp_strip_all_tags( $description ) ); ?>
+                    </div>
                 </div>
+                <div class="extra content">
+                    <div class="ui stacking grid">
+                        <div class="four wide left aligned column">
+                        <?php
+                        wp_star_rating(
+                            array(
+                                'rating' => $plugin['rating'],
+                                'type'   => 'percent',
+                                'number' => $plugin['num_ratings'],
+                            )
+                        );
+                        ?>
+                        </div>
+                        <div class="twelve wide right aligned column"><span class="ui small text"><?php
+                        /* translators: %s: Human-readable time difference. */
+                        printf( esc_html__( 'Updated %s ago', 'mainwp' ), human_time_diff( $last_updated_timestamp ) ); // phpcs:ignore WordPress.Security.EscapeOutput ?></span></div>
+                    </div>
+                </div>
+                <div class="extra content">
+                    <div class="ui two column grid">
+                        <div class="left aligned middle aligned column">
+                            <a href="<?php echo esc_attr( $details_link ); ?>" class="ui mini button open-plugin-details-modal"><?php echo esc_html__( 'Plugin Details', 'mainwp' ); ?></a>
+                        </div>
+                        <div class="right aligned middle aligned column">
+                            <div class="ui radio checkbox">
+                            <input name="install-plugin" type="radio" id="install-plugin-<?php echo sanitize_html_class( $plugin['slug'] ); ?>" plugin-name="<?php echo esc_attr( $title ); ?>" plugin-version="<?php echo esc_attr( $version ); ?>">
+                            <label><?php esc_html_e( 'Install Plugin', 'mainwp' ); ?></label>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <?php
+            /**
+             * Action: mainwp_install_plugin_card_bottom
+             *
+             * Fires at the plugin card at bottom on the Install Plugins page.
+             *
+             * @since 4.1
+             */
+            do_action( 'mainwp_install_plugin_card_bottom', $plugin );
+            ?>
+        </div>
             <?php
         }
         ?>
